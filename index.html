@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>代号：铁雨 — 现代战争程序化写实 FPS</title>
+</head>
+<body>
+  <div id="app">
+    <canvas id="game-canvas"></canvas>
+
+    <!-- Main Menu -->
+    <div id="menu-screen" class="overlay-screen">
+      <div class="menu-backdrop"></div>
+      <div class="menu-container">
+        <div class="menu-header">
+          <div class="mission-tag">OPERATION // IRON RAIN</div>
+          <h1>代号：铁雨</h1>
+          <p class="subtitle">纯程序化实时 PBR / SSR / GTAO / 3D 音频军事战术 FPS</p>
+        </div>
+
+        <div class="level-select-row">
+          <button id="lvl-btn-1" class="level-card active" data-level="level1">
+            <div class="lvl-tag">MISSION 01 // OUTDOOR</div>
+            <div class="lvl-name">第一关：雨夜林地哨站</div>
+            <div class="lvl-desc">250m 暴雨山谷渗透与哨站夺取 • M4A1 + M1911</div>
+          </button>
+          <button id="lvl-btn-2" class="level-card" data-level="level2">
+            <div class="lvl-tag">MISSION 02 // UNDERGROUND</div>
+            <div class="lvl-name">第二关：地下发射井夜袭</div>
+            <div class="lvl-desc">180m 潜行管廊与三层核井突围 • 新增 MP5SD + 手电</div>
+          </button>
+        </div>
+
+        <div class="menu-grid">
+          <div class="menu-panel">
+            <h2>画质与系统设定</h2>
+            <div class="setting-row">
+              <label for="quality-select">画质预设</label>
+              <select id="quality-select">
+                <option value="high" selected>高画质 (100% 原生分辨率 / 3x2048 CSM / GTAO / SSR)</option>
+                <option value="medium">中画质 (动态缩放 / 3x1024 CSM / GTAO / SSR)</option>
+                <option value="low">低画质 (高性能缩放 / 2x1024 CSM)</option>
+              </select>
+            </div>
+            <div class="setting-row">
+              <label for="sens-range">腰射鼠标灵敏度 <span id="sens-val">1.0</span></label>
+              <input id="sens-range" type="range" min="0.3" max="2.5" step="0.1" value="1.0" />
+            </div>
+            <div class="setting-row">
+              <label for="ads-sens-range">开镜 (ADS) 灵敏度 <span id="ads-sens-val">0.6</span></label>
+              <input id="ads-sens-range" type="range" min="0.2" max="2.0" step="0.1" value="0.6" />
+            </div>
+            <div class="setting-row">
+              <label for="vol-range">主音量 <span id="vol-val">80%</span></label>
+              <input id="vol-range" type="range" min="0" max="1" step="0.05" value="0.8" />
+            </div>
+            <div class="setting-row">
+              <label for="fov-range">垂直视野 FOV <span id="fov-val">68°</span></label>
+              <input id="fov-range" type="range" min="55" max="85" step="1" value="68" />
+            </div>
+          </div>
+
+          <div class="menu-panel">
+            <h2>战术操作说明</h2>
+            <ul class="controls-list">
+              <li><span>移动 / 冲刺</span><b>W A S D / Shift</b></li>
+              <li><span>跳跃 / 蹲伏</span><b>Space / C 或 Ctrl</b></li>
+              <li><span>射击 / 机械瞄准 (ADS)</span><b>左键 / 右键</b></li>
+              <li><span>战术换弹</span><b>R</b></li>
+              <li><span>切换武器 (主/副/快速测试)</span><b>1 / 2 / 3-5 或 Q</b></li>
+              <li><span>战术手电筒 / 交互黑入</span><b>F / E</b></li>
+              <li><span>暂停 / 释放指针</span><b>P 或 ESC</b></li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="menu-actions">
+          <button id="btn-start" class="btn-primary">开始行动 (DEPLOY)</button>
+          <button id="btn-gunsmith" class="btn-secondary">军械库 / 3D 改枪面板</button>
+          <div id="loading-status" class="loading-status hidden">
+            <div class="spinner"></div>
+            <span id="loading-text">正在生成程序化战场与 PBR 贴图...</span>
+          </div>
+        </div>
+
+        <div class="tech-footer" id="menu-tech-info">
+          100% Zero-Asset Procedural Engine • WebGL 2.0 HDR + ACES + CSM + GTAO + SSR + WebAudio Synth
+        </div>
+      </div>
+    </div>
+
+    <!-- Mission Briefing -->
+    <div id="briefing-screen" class="overlay-screen hidden">
+      <div class="briefing-box">
+        <div class="mission-tag">CLASSIFIED BRIEFING // 04:40 LOCAL</div>
+        <h2>任务简报：暗夜突袭</h2>
+        <div class="briefing-body">
+          <p><strong>作战区域：</strong>北纬 54° 暴雨山谷前哨站（250m × 250m）</p>
+          <p><strong>战场情报：</strong>敌方精锐步兵班组占领了山脊废弃混凝土哨站，并部署了外围巡逻哨与通讯终端。</p>
+          <p><strong>行动阶段：</strong></p>
+          <ol>
+            <li>突破外围雨林防线，清除前沿巡逻兵。</li>
+            <li>攻入敌方哨站，消灭守军并靠近占领中央通讯台。</li>
+            <li>前往西北山脊撤离点，完成撤离。</li>
+          </ol>
+          <p class="tip">提示：善用掩体与右键机械瞄准（ADS），暴雨和雷声可掩护你的推进。</p>
+        </div>
+        <div class="pause-actions">
+          <button id="btn-deploy" class="btn-primary">锁定视角并投入战斗</button>
+          <button id="btn-briefing-gunsmith" class="btn-secondary">前往改枪面板 (GUNSMITH)</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3D Real-Time Gunsmith Workbench -->
+    <div id="gunsmith-screen" class="gunsmith-screen hidden">
+      <div id="gs-stage-area">
+        <div id="gs-node-layer"></div>
+        <div class="gs-controls-hint">左键拖拽 360° 旋转检视 • 滚轮缩放导轨细节 • 点击枪身节点切换配件</div>
+      </div>
+
+      <div class="gs-top-bar">
+        <div class="gs-brand">
+          <span class="mission-tag">ARMORY // GUNSMITH WORKBENCH</span>
+          <span id="gs-weapon-title" class="gs-title">SIG M7 (XM7)</span>
+          <span id="gs-weapon-role" class="gs-role">6.8mm 新一代全威力步枪</span>
+        </div>
+        <div class="gs-weapon-tabs">
+          <button class="gs-weap-btn" data-weapon="m4a1">M4A1</button>
+          <button class="gs-weap-btn" data-weapon="ar15">AR-15 DMR</button>
+          <button class="gs-weap-btn" data-weapon="m7">SIG M7</button>
+          <button class="gs-weap-btn" data-weapon="mp5sd">MP5SD</button>
+          <button class="gs-weap-btn" data-weapon="m1911">M1911</button>
+        </div>
+        <div class="gs-top-actions">
+          <button id="gs-btn-equip-primary" class="btn-secondary">设为主武器带入战斗</button>
+          <button id="gs-btn-reset-view" class="btn-secondary">重置视角</button>
+          <button id="gs-btn-back" class="btn-secondary">返回主菜单</button>
+        </div>
+      </div>
+
+      <aside class="gs-right-panel">
+        <div class="gs-section-title">战术配件槽位</div>
+        <div id="gs-slot-tabs" class="gs-slot-tabs"></div>
+        <div id="gs-options-list" class="gs-options-list"></div>
+
+        <div class="gs-section-title" style="margin-top: 12px;">武器性能面板</div>
+        <div class="gs-stats-panel">
+          <div class="gs-stat-row">
+            <div class="gs-stat-head"><span>伤害 DAMAGE</span><b id="stat-dmg-val">50</b></div>
+            <div class="gs-stat-track"><div id="stat-dmg-bar" class="gs-stat-fill"></div></div>
+          </div>
+          <div class="gs-stat-row">
+            <div class="gs-stat-head"><span>射速 FIRE RATE</span><b id="stat-rpm-val">70</b></div>
+            <div class="gs-stat-track"><div id="stat-rpm-bar" class="gs-stat-fill"></div></div>
+          </div>
+          <div class="gs-stat-row">
+            <div class="gs-stat-head"><span>后坐力控制 CONTROL</span><b id="stat-rec-val">65</b></div>
+            <div class="gs-stat-track"><div id="stat-rec-bar" class="gs-stat-fill"></div></div>
+          </div>
+          <div class="gs-stat-row">
+            <div class="gs-stat-head"><span>开镜速度 ADS SPEED</span><b id="stat-ads-val">75</b></div>
+            <div class="gs-stat-track"><div id="stat-ads-bar" class="gs-stat-fill"></div></div>
+          </div>
+          <div class="gs-stat-row">
+            <div class="gs-stat-head"><span>机动性 MOBILITY</span><b id="stat-mob-val">72</b></div>
+            <div class="gs-stat-track"><div id="stat-mob-bar" class="gs-stat-fill"></div></div>
+          </div>
+          <div id="gs-ammo-summary" class="gs-ammo-summary">弹匣容量: 30 发</div>
+        </div>
+
+        <div class="gs-deploy-footer">
+          <select id="gs-level-select" class="gs-level-select">
+            <option value="level1">第一关：雨夜林地哨站</option>
+            <option value="level2">第二关：地下发射井夜袭</option>
+          </select>
+          <button id="gs-btn-deploy" class="btn-primary gs-deploy-btn">快速进靶场 / 开始任务</button>
+        </div>
+      </aside>
+    </div>
+
+    <!-- In-Game HUD -->
+    <div id="hud" class="hidden">
+      <div id="damage-vignette"></div>
+      <div id="hit-indicator-ring"></div>
+      <div id="hitmarker" class="hidden">
+        <span></span><span></span><span></span><span></span>
+      </div>
+
+      <!-- Top Objective & Compass -->
+      <div class="hud-top">
+        <div class="compass-bar" id="compass-bar">N • • • NE • • • E</div>
+        <div class="objective-box">
+          <div class="obj-label">当前目标</div>
+          <div id="obj-text">突破雨林防线，推进至前哨站</div>
+          <div id="obj-dist" class="obj-dist">距离目标: 120m</div>
+        </div>
+      </div>
+
+      <!-- Top Right Performance & Controls Hint -->
+      <div class="hud-perf" id="hud-perf">
+        <span id="fps-counter">60 FPS</span>
+        <span id="res-info">1920×1080</span>
+      </div>
+
+      <!-- Center Crosshair -->
+      <div id="crosshair">
+        <div class="ch-line ch-top"></div>
+        <div class="ch-line ch-bottom"></div>
+        <div class="ch-line ch-left"></div>
+        <div class="ch-line ch-right"></div>
+        <div class="ch-dot"></div>
+      </div>
+
+      <!-- Center Prompt (Reload / Capture / Interact) -->
+      <div id="center-prompt" class="hidden"></div>
+
+      <!-- Bottom Left Health & Stance -->
+      <div class="hud-bottom-left">
+        <div class="health-panel">
+          <div class="hp-header">
+            <span>HP</span>
+            <span id="hp-value">100</span>
+          </div>
+          <div class="hp-bar-bg">
+            <div id="hp-bar-fill" style="width: 100%"></div>
+          </div>
+          <div class="stance-row" id="stance-text">站姿 | 正常</div>
+        </div>
+      </div>
+
+      <!-- Bottom Right Weapon & Ammo -->
+      <div class="hud-bottom-right">
+        <div class="weapon-panel">
+          <div class="weapon-name" id="weapon-name">M4A1 SOPMOD</div>
+          <div class="ammo-readout">
+            <span id="ammo-mag">30</span>
+            <span class="ammo-sep">/</span>
+            <span id="ammo-reserve">150</span>
+          </div>
+          <div class="fire-mode" id="weapon-sub">5.56×45mm NATO • 全自动 • [1] 主武器 [2] 手枪</div>
+        </div>
+      </div>
+
+      <!-- Click to resume pointer lock banner -->
+      <div id="lock-hint" class="hidden">点击画面继续战斗 (按 P 或 ESC 暂停)</div>
+    </div>
+
+    <!-- Pause Menu -->
+    <div id="pause-screen" class="overlay-screen hidden">
+      <div class="pause-box">
+        <h2>战术暂停</h2>
+        <div class="setting-row">
+          <label for="pause-quality">画质预设</label>
+          <select id="pause-quality">
+            <option value="high">高画质 (100% 原生)</option>
+            <option value="medium">中画质</option>
+            <option value="low">低画质</option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <label for="pause-sens">腰射灵敏度 <span id="pause-sens-val">1.0</span></label>
+          <input id="pause-sens" type="range" min="0.3" max="2.5" step="0.1" value="1.0" />
+        </div>
+        <div class="setting-row">
+          <label for="pause-ads-sens">ADS 灵敏度 <span id="pause-ads-sens-val">0.6</span></label>
+          <input id="pause-ads-sens" type="range" min="0.2" max="2.0" step="0.1" value="0.6" />
+        </div>
+        <div class="pause-actions">
+          <button id="btn-resume" class="btn-primary">继续战斗</button>
+          <button id="btn-restart" class="btn-secondary">重新部署</button>
+          <button id="btn-to-menu" class="btn-secondary">返回主菜单</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- End / Summary Screen -->
+    <div id="end-screen" class="overlay-screen hidden">
+      <div class="summary-box">
+        <div class="mission-tag" id="end-tag">MISSION ACCOMPLISHED</div>
+        <h2 id="end-title">撤离成功 — 任务完成</h2>
+        <div class="stats-grid" id="stats-grid">
+          <div class="stat-item"><span>行动耗时</span><b id="stat-time">00:00</b></div>
+          <div class="stat-item"><span>击毙敌军</span><b id="stat-kills">0</b></div>
+          <div class="stat-item"><span>爆头击杀</span><b id="stat-headshots">0</b></div>
+          <div class="stat-item"><span>射击命中率</span><b id="stat-accuracy">0%</b></div>
+          <div class="stat-item"><span>承受伤害</span><b id="stat-damage">0</b></div>
+          <div class="stat-item"><span>战术评级</span><b id="stat-rank">A</b></div>
+        </div>
+        <div class="pause-actions">
+          <button id="btn-replay" class="btn-primary">再次出击</button>
+          <button id="btn-end-menu" class="btn-secondary">返回主菜单</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
