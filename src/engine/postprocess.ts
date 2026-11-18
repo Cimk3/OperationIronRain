@@ -482,6 +482,8 @@ export class PostProcessPipeline {
             col += godRays * smoothstep(1.2, 8.0, viewDist) * 0.75;
           }
 
+          if (any(isnan(col)) || any(isinf(col))) col = vec3(0.0);
+          col = clamp(col, vec3(0.0), vec3(32.0));
           gl_FragColor = vec4(col, 1.0);
         }
       `,
@@ -500,6 +502,8 @@ export class PostProcessPipeline {
         varying vec2 vUv;
         void main() {
           vec3 c = texture2D(tSrc, vUv).rgb;
+          if (any(isnan(c)) || any(isinf(c))) c = vec3(0.0);
+          c = clamp(c, vec3(0.0), vec3(32.0));
           float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
           float soft = max(0.0, lum - uThreshold) / max(0.0001, lum);
           gl_FragColor = vec4(c * soft * 0.85, 1.0);

@@ -347,7 +347,7 @@ function buildSoldierTemplate(): SoldierRigTemplate {
   maskGeo.setAttribute('position', new THREE.Float32BufferAttribute(mPos, 3));
   maskGeo.setAttribute('uv', new THREE.Float32BufferAttribute(mUv, 2));
   maskGeo.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(mSkinI, 4));
-  maskGeo.setAttribute('skinWeight', new THREE.Uint16BufferAttribute(mSkinW, 4));
+  maskGeo.setAttribute('skinWeight', new THREE.Float32BufferAttribute(mSkinW, 4));
   maskGeo.setIndex(mIdx);
   maskGeo.computeVertexNormals();
 
@@ -803,27 +803,39 @@ export class EnemySoldier {
     const cosA = THREE.MathUtils.clamp((l1 * l1 + dist * dist - l2 * l2) / (2 * l1 * dist), -1, 1);
     const angA = Math.acos(cosA);
 
-    const poleProj = poleDir.clone().addScaledVector(dir, -poleDir.dot(dir)).normalize();
+    const poleProj = poleDir.clone().addScaledVector(dir, -poleDir.dot(dir));
+    if (poleProj.lengthSq() < 1e-6) {
+      poleProj.set(1, 0, 0).addScaledVector(dir, -dir.x);
+    }
+    poleProj.normalize();
     const upperDir = dir.clone().multiplyScalar(Math.cos(angA)).addScaledVector(poleProj, Math.sin(angA)).normalize();
 
     const elbow = upperDir.clone().multiplyScalar(l1);
-    const foreDir = rel.clone().sub(elbow).normalize();
+    const foreRel = rel.clone().sub(elbow);
+    const foreDir = foreRel.lengthSq() > 1e-6 ? foreRel.normalize() : dir.clone();
 
     // Shared anatomical hinge axis perpendicular to arm bend plane guarantees zero elbow twist/pinch!
     const hingeRaw = new THREE.Vector3().crossVectors(upperDir, foreDir);
-    const sideAxis =
-      hingeRaw.lengthSq() > 1e-5
-        ? hingeRaw.normalize()
-        : new THREE.Vector3().crossVectors(poleProj, upperDir).normalize();
+    if (hingeRaw.lengthSq() < 1e-5) {
+      hingeRaw.crossVectors(poleProj, upperDir);
+    }
+    if (hingeRaw.lengthSq() < 1e-5) {
+      hingeRaw.set(1, 0, 0);
+    }
+    const sideAxis = hingeRaw.normalize();
 
     const negUpper = upperDir.clone().negate();
-    const uFwd = new THREE.Vector3().crossVectors(sideAxis, negUpper).normalize();
+    const uFwd = new THREE.Vector3().crossVectors(sideAxis, negUpper);
+    if (uFwd.lengthSq() < 1e-6) uFwd.set(0, 0, 1);
+    uFwd.normalize();
     const uSide = new THREE.Vector3().crossVectors(negUpper, uFwd).normalize();
     const uMat = new THREE.Matrix4().makeBasis(uSide, negUpper, uFwd);
     upperArm.quaternion.setFromRotationMatrix(uMat);
 
     const negFore = foreDir.clone().negate();
-    const fFwd = new THREE.Vector3().crossVectors(sideAxis, negFore).normalize();
+    const fFwd = new THREE.Vector3().crossVectors(sideAxis, negFore);
+    if (fFwd.lengthSq() < 1e-6) fFwd.copy(uFwd);
+    fFwd.normalize();
     const fSide = new THREE.Vector3().crossVectors(negFore, fFwd).normalize();
     const fWorldMat = new THREE.Matrix4().makeBasis(fSide, negFore, fFwd);
     const uInv = new THREE.Matrix4().copy(uMat).invert();

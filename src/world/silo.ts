@@ -881,10 +881,10 @@ export class SiloWorld {
     // =========================================================================
     // ZONE 0: EXTERIOR SURFACE ENTRY PAD (Z: 62..88, Y: 0) & EXTRACTION PAD (X: 15..31, Z: 16..34)
     // =========================================================================
-    addFloor('ext', -14, 14, 62, 88, 0, floorMat, MaterialId.CONCRETE);
-    addBox('ext', -13.5, 1.5, 75, 1.0, 3.4, 27, concreteMat);
-    addBox('ext', 13.5, 1.5, 75, 1.0, 3.4, 27, concreteMat);
-    addBox('ext', 0, 1.5, 87.5, 28, 3.4, 1.0, concreteMat);
+    addFloor('ext', -14.2, 14.2, 61.6, 88.2, 0, floorMat, MaterialId.CONCRETE);
+    addBox('ext', -13.5, 2.4, 75, 1.0, 5.4, 27, concreteMat);
+    addBox('ext', 13.5, 2.4, 75, 1.0, 5.4, 27, concreteMat);
+    addBox('ext', 0, 2.4, 87.5, 28, 5.4, 1.0, concreteMat);
     addHazardStrip('ext', -12.95, 0.12, 75, 0.06, 0.24, 25);
     addHazardStrip('ext', 12.95, 0.12, 75, 0.06, 0.24, 25);
 
@@ -936,15 +936,15 @@ export class SiloWorld {
     this.zones.ext.add(extLight);
     this.dynamicLights.push({ pos: extLight.position.clone(), light: extLight, baseIntensity: 16, flicker: false, phase: 0 });
 
-    // Surface Extraction Pad (X: 15..31, Z: 16..34, Y: 0) — fully sealed South parapets flanking Escape Ramp!
-    addFloor('ext', 15, 31, 16, 34, 0, floorMat, MaterialId.CONCRETE);
-    addBox('ext', 31.0, 1.4, 25, 0.9, 2.8, 19, concreteMat);
-    addBox('ext', 23.0, 1.4, 33.8, 17, 2.8, 0.9, concreteMat);
-    addBox('ext', 15.2, 1.4, 25, 0.9, 2.8, 19, concreteMat);
+    // Surface Extraction Pad (X: 15..31, Z: 16..34, Y: 0) — fully sealed 5.4m perimeter parapets flanking Escape Ramp!
+    addFloor('ext', 14.8, 31.4, 15.6, 34.4, 0, floorMat, MaterialId.CONCRETE);
+    addBox('ext', 31.0, 2.4, 25, 0.9, 5.4, 19.5, concreteMat);
+    addBox('ext', 23.0, 2.4, 33.8, 17, 5.4, 0.9, concreteMat);
+    addBox('ext', 15.2, 2.4, 25, 0.9, 5.4, 19.5, concreteMat);
     // Sealed South concrete wing walls flanking Escape Ramp exit (X: 19.1..25.3)
-    addBox('ext', 17.0, 1.4, 16.0, 4.4, 2.8, 0.9, concreteMat);
-    addBox('ext', 28.2, 1.4, 16.0, 6.2, 2.8, 0.9, concreteMat);
-    addBox('ext', 22.2, 3.7, 16.0, 7.2, 1.2, 0.9, concreteMat); // Portal lintel over escape mouth
+    addBox('ext', 17.0, 2.4, 16.0, 4.4, 5.4, 0.9, concreteMat);
+    addBox('ext', 28.2, 2.4, 16.0, 6.2, 5.4, 0.9, concreteMat);
+    addBox('ext', 22.2, 4.1, 16.0, 7.2, 2.0, 0.9, concreteMat); // Tall portal lintel sealing above escape mouth
     // Helipad LZ markings & green perimeter bollards
     addHazardStrip('ext', 23.0, 0.02, 24.5, 4.2, 0.02, 0.28);
     addHazardStrip('ext', 21.0, 0.02, 24.5, 0.28, 0.02, 3.4);
@@ -1047,9 +1047,15 @@ export class SiloWorld {
       const mid = (z0 + z1) * 0.5;
       addBox('corridors', -3.05, -6.2, mid, 0.55, 4.2, len, concreteMat);
       addHazardStrip('corridors', -2.76, -7.89, mid, 0.04, 0.22, len - 0.3);
-      if (z0 >= -18.5 && z1 <= 30.5) {
-        addBox('corridors', -7.15, -6.2, mid, 0.55, 4.2, len, concreteMat);
-        addHazardStrip('corridors', -7.44, -7.89, mid, 0.04, 0.22, len - 0.3);
+
+      // Seal Stealth Tunnel East divider across BOTH tunnel ends [-18.6..-15.7] and [27.7..30.6] so zero void openings exist!
+      const sz0 = Math.max(-18.6, z0);
+      const sz1 = Math.min(30.6, z1);
+      if (sz1 > sz0 + 0.2) {
+        const sLen = sz1 - sz0;
+        const sMid = (sz0 + sz1) * 0.5;
+        addBox('corridors', -7.15, -6.2, sMid, 0.55, 4.2, sLen, concreteMat);
+        addHazardStrip('corridors', -7.44, -7.89, sMid, 0.04, 0.22, sLen - 0.3);
       }
     }
 
@@ -1567,6 +1573,17 @@ export class SiloWorld {
     this.zones.corridors.visible = z > -38 && z < 60 && x < 16;
     this.zones.silo.visible = z < 12;
     this.zones.escape.visible = z < -12 || x > 14;
+  }
+
+  public hasFloorAt(wx: number, wz: number, refY = 2.0): boolean {
+    for (const f of this.floorZones) {
+      if (wx >= f.minX - 0.25 && wx <= f.maxX + 0.25 && wz >= f.minZ - 0.25 && wz <= f.maxZ + 0.25) {
+        if (f.yAt(wx, wz) <= refY + 1.35) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   public getHeightAt(wx: number, wz: number, refY = 2.0): number {

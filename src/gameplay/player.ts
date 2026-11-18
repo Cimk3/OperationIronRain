@@ -29,11 +29,13 @@ export class PlayerController {
   private hitPunchRoll = 0;
   private stepAccum = 0;
   private healDelay = 0;
+  private lastSafePos = new THREE.Vector3();
 
   public keys: Record<string, boolean> = {};
 
   constructor(spawnX: number, spawnZ: number, terrain: WorldSurface) {
     this.position.set(spawnX, terrain.getHeightAt(spawnX, spawnZ, 5), spawnZ);
+    this.lastSafePos.copy(this.position);
     this.yaw = 0;
     this.pitch = -0.02;
   }
@@ -142,53 +144,79 @@ export class PlayerController {
     const nextX = this.position.x + this.velocity.x * dt;
     const nextZ = this.position.z + this.velocity.z * dt;
 
-    // Keep within playable valley bounds [-118, +118]
-    this.position.x = THREE.MathUtils.clamp(nextX, -116, 116);
-    this.position.z = THREE.MathUtils.clamp(nextZ, -116, 116);
+    // Keep within playable valley bounds on outdoor terrain [-100, +100] (strictly below ±125m mountain rim!)
+    const floorChecker = (terrain as unknown as { hasFloorAt?: (x: number, z: number, refY?: number) => boolean }).hasFloorAt;
+    if (floorChecker) {
+      this.position.x = nextX;
+      this.position.z = nextZ;
+    } else {
+      this.position.x = THREE.MathUtils.clamp(nextX, -100, 100);
+      this.position.z = THREE.MathUtils.clamp(nextZ, -100, 100);
+    }
     this.position.y += this.velocity.y * dt;
 
-    // Resolve horizontal sliding collisions against Outpost Boxes & Trees/Rocks
+    // Resolve horizontal sliding collisions against Outpost / Silo Walls & Cover (3 passes for crisp sealed corners!)
     const pTop = this.position.y + (this.isCrouching ? 1.25 : 1.78);
     const pBot = this.position.y + 0.35; // Step height tolerance 0.35m so low ledges don't snag feet!
 
-    for (const c of boxColliders) {
-      if (pTop < c.box.min.y || pBot > c.box.max.y) continue;
-      const closestX = THREE.MathUtils.clamp(this.position.x, c.box.min.x, c.box.max.x);
-      const closestZ = THREE.MathUtils.clamp(this.position.z, c.box.min.z, c.box.max.z);
-      const dx = this.position.x - closestX;
-      const dz = this.position.z - closestZ;
-      const distSq = dx * dx + dz * dz;
-      if (distSq < this.radius * this.radius) {
-        const dist = Math.sqrt(distSq);
-        if (dist > 1e-5) {
-          const push = this.radius - dist;
-          this.position.x += (dx / dist) * push;
-          this.position.z += (dz / dist) * push;
-        } else {
-          // Inside box center fallback: push out along shallowest axis
-          const penX = Math.min(Math.abs(this.position.x - c.box.min.x), Math.abs(c.box.max.x - this.position.x));
-          const penZ = Math.min(Math.abs(this.position.z - c.box.min.z), Math.abs(c.box.max.z - this.position.z));
-          if (penX < penZ) {
-            this.position.x = this.position.x < (c.box.min.x + c.box.max.x) * 0.5 ? c.box.min.x - this.radius : c.box.max.x + this.radius;
+    for (let pass = 0; pass < 3; pass++) {
+      for (const c of boxColliders) {
+        if (pTop < c.box.min.y || pBot > c.box.max.y) continue;
+        const closestX = THREE.MathUtils.clamp(this.position.x, c.box.min.x, c.box.max.x);
+        const closestZ = THREE.MathUtils.clamp(this.position.z, c.box.min.z, c.box.max.z);
+        const dx = this.position.x - closestX;
+        const dz = this.position.z - closestZ;
+        const distSq = dx * dx + dz * dz;
+        if (distSq < this.radius * this.radius) {
+          const dist = Math.sqrt(distSq);
+          if (dist > 1e-5) {
+            const push = this.radius - dist;
+            this.position.x += (dx / dist) * push;
+            this.position.z += (dz / dist) * push;
           } else {
-            this.position.z = this.position.z < (c.box.min.z + c.box.max.z) * 0.5 ? c.box.min.z - this.radius : c.box.max.z + this.radius;
+            // Inside box center fallback: push out along shallowest axis
+            const penX = Math.min(Math.abs(this.position.x - c.box.min.x), Math.abs(c.box.max.x - this.position.x));
+            const penZ = Math.min(Math.abs(this.position.z - c.box.min.z), Math.abs(c.box.max.z - this.position.z));
+            if (penX < penZ) {
+              this.position.x = this.position.x < (c.box.min.x + c.box.max.x) * 0.5 ? c.box.min.x - this.radius : c.box.max.x + this.radius;
+            } else {
+              this.position.z = this.position.z < (c.box.min.z + c.box.max.z) * 0.5 ? c.box.min.z - this.radius : c.box.max.z + this.radius;
+            }
           }
+        }
+      }
+
+      for (const cyl of cylColliders) {
+        if (pTop < cyl.bottomY || pBot > cyl.topY) continue;
+        const dx = this.position.x - cyl.x;
+        const dz = this.position.z - cyl.z;
+        const minR = this.radius + cyl.radius;
+        const dSq = dx * dx + dz * dz;
+        if (dSq < minR * minR && dSq > 1e-6) {
+          const d = Math.sqrt(dSq);
+          const push = minR - d;
+          this.position.x += (dx / d) * push;
+          this.position.z += (dz / d) * push;
         }
       }
     }
 
-    for (const cyl of cylColliders) {
-      if (pTop < cyl.bottomY || pBot > cyl.topY) continue;
-      const dx = this.position.x - cyl.x;
-      const dz = this.position.z - cyl.z;
-      const minR = this.radius + cyl.radius;
-      const dSq = dx * dx + dz * dz;
-      if (dSq < minR * minR && dSq > 1e-6) {
-        const d = Math.sqrt(dSq);
-        const push = minR - d;
-        this.position.x += (dx / d) * push;
-        this.position.z += (dz / d) * push;
+    // Strict Anti-Out-of-Bounds / Inside-Wall Recovery (never escape playable floor zones or clip inside walls!)
+    const corePt = new THREE.Vector3(this.position.x, this.position.y + 1.0, this.position.z);
+    let insideSolidWall = false;
+    for (const c of boxColliders) {
+      if (c.blocksSight && c.box.containsPoint(corePt)) {
+        insideSolidWall = true;
+        break;
       }
+    }
+    const outsideFloor = floorChecker ? !floorChecker.call(terrain, this.position.x, this.position.z, this.position.y) : false;
+    if (insideSolidWall || outsideFloor) {
+      this.position.copy(this.lastSafePos);
+      this.velocity.x = 0;
+      this.velocity.z = 0;
+    } else {
+      this.lastSafePos.copy(this.position);
     }
 
     // Terrain & multi-level floor/ramp grounding (snap smoothly on downward ramps!)
