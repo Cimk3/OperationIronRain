@@ -2,7 +2,7 @@
 
 基于 **TypeScript + Vite + Three.js + WebGL 2.0 + Web Audio API / AudioWorklet + Web Worker** 构建的**100% 零外部美术/音频资源纯代码程序化写实军事战术 PVE FPS Demo**。  
 所有三维模型、PBR 法线/粗糙度/金属度/AO 贴图、地形与植被、骨骼蒙皮动画、体积雾/水坑反射后处理以及枪械与环境音效均由程序实时算法合成生成。
-
+在线游玩：https://cimk3.github.io/OperationIronRain/
 ---
 
 ## 核心特性
