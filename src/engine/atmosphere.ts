@@ -19,9 +19,9 @@ export function buildAtmosphereSystem(
   const group = new THREE.Group();
   group.name = 'AtmosphereSystem';
 
-  // Low-angle warm sun breaking subtly through dark storm clouds (North-West)
-  const sunDirection = new THREE.Vector3(-0.36, 0.28, -0.89).normalize();
-  const sunLightColor = new THREE.Color(0xe2be8e);
+  // Overcast storm-diffused daylight breaking faintly through heavy clouds (CoD4 realistic cool-grey tone!)
+  const sunDirection = new THREE.Vector3(-0.34, 0.56, -0.75).normalize();
+  const sunLightColor = new THREE.Color(0xcbd6df);
 
   // 1. PROCEDURAL STORMY SKY DOME WITH DYNAMIC CLOUDS & LIGHTNING
   const skyUniforms = {
@@ -79,35 +79,33 @@ export function buildAtmosphereSystem(
         vec3 sunD = normalize(uSunDir);
         float sunDot = max(0.0, dot(dir, sunD));
 
-        // Moody CoD4 overcast storm slate-blue sky
-        vec3 horizonCol = vec3(0.085, 0.112, 0.145);
-        vec3 zenithCol = vec3(0.025, 0.038, 0.058);
-        vec3 sky = mix(horizonCol, zenithCol, pow(max(0.0, h), 0.58));
+        // Authentic CoD4 overcast rainstorm sky (cool slate grey clouds, zero nuclear amber sunset!)
+        vec3 horizonCol = vec3(0.22, 0.255, 0.295);
+        vec3 zenithCol = vec3(0.085, 0.108, 0.138);
+        vec3 sky = mix(horizonCol, zenithCol, pow(max(0.0, h), 0.62));
 
-        // Subtle warm amber break near sun (never nuclear overexposed!)
-        sky += vec3(0.38, 0.24, 0.11) * pow(sunDot, 7.0) * 0.55;
-        sky += vec3(1.15, 0.85, 0.50) * smoothstep(0.997, 0.9996, sunDot);
+        // Subtle cool-silver cloud break near diffused sun direction
+        sky += vec3(0.14, 0.155, 0.175) * pow(sunDot, 4.5) * 0.55;
 
         if (dir.y > 0.01) {
-          vec2 cloudUV = dir.xz / (dir.y + 0.18);
-          float c1 = fbm(cloudUV * 0.55 + vec2(uTime * 0.022, uTime * 0.012));
-          float c2 = fbm(cloudUV * 1.35 - vec2(uTime * 0.035, uTime * 0.018));
-          float cloudDensity = smoothstep(0.28, 0.84, c1 * 0.7 + c2 * 0.35);
+          vec2 cloudUV = dir.xz / (dir.y + 0.22);
+          float c1 = fbm(cloudUV * 0.58 + vec2(uTime * 0.018, uTime * 0.010));
+          float c2 = fbm(cloudUV * 1.45 - vec2(uTime * 0.028, uTime * 0.014));
+          float cloudDensity = smoothstep(0.26, 0.84, c1 * 0.68 + c2 * 0.36);
 
-          vec3 cloudDark = vec3(0.035, 0.048, 0.068);
-          vec3 cloudCoolRim = vec3(0.14, 0.18, 0.23);
-          vec3 cloudWarmRim = vec3(0.42, 0.28, 0.14) * pow(sunDot, 5.0);
-          vec3 cloudCol = mix(cloudCoolRim + cloudWarmRim, cloudDark, cloudDensity);
+          vec3 cloudDark = vec3(0.085, 0.104, 0.128);
+          vec3 cloudLight = vec3(0.27, 0.305, 0.345) + vec3(0.08, 0.085, 0.09) * pow(sunDot, 4.0);
+          vec3 cloudCol = mix(cloudLight, cloudDark, cloudDensity);
 
-          cloudCol += vec3(0.65, 0.78, 1.0) * uLightning * (0.4 + 0.9 * (1.0 - cloudDensity));
+          cloudCol += vec3(0.55, 0.68, 0.88) * uLightning * (0.35 + 0.75 * (1.0 - cloudDensity));
 
-          float horizonFade = smoothstep(0.01, 0.16, dir.y);
-          sky = mix(sky, cloudCol, horizonFade * 0.92);
+          float horizonFade = smoothstep(0.01, 0.18, dir.y);
+          sky = mix(sky, cloudCol, horizonFade * 0.90);
         }
 
-        float mist = pow(1.0 - abs(dir.y), 6.5);
-        vec3 mistCol = horizonCol + vec3(0.18, 0.12, 0.06) * pow(sunDot, 5.0);
-        sky = mix(sky, mistCol * (1.0 + uLightning * 0.6), mist * 0.78);
+        float mist = pow(1.0 - abs(dir.y), 5.5);
+        vec3 mistCol = horizonCol * 0.96;
+        sky = mix(sky, mistCol * (1.0 + uLightning * 0.45), mist * 0.72);
 
         gl_FragColor = vec4(sky, 1.0);
       }
@@ -118,24 +116,24 @@ export function buildAtmosphereSystem(
   skyMesh.name = 'StormSkyDome';
   group.add(skyMesh);
 
-  // 2. GPU WIND-TILTED RAIN STREAKS (zero CPU loop per drop!)
+  // 2. FINE REALISTIC RAIN DROPLETS (Short, subtle alpha-blended droplets — zero thick white needle lines!)
   const rainCount = quality.rainCount;
-  const rainPos = new Float32Array(rainCount * 6); // 2 vertices per streak
+  const rainPos = new Float32Array(rainCount * 6);
   const rainSeed = new Float32Array(rainCount * 2);
   for (let i = 0; i < rainCount; i++) {
-    const rx = (Math.random() - 0.5) * 44;
-    const ry = Math.random() * 24;
-    const rz = (Math.random() - 0.5) * 44;
-    const len = 0.65 + Math.random() * 0.55;
+    const rx = (Math.random() - 0.5) * 34;
+    const ry = Math.random() * 18;
+    const rz = (Math.random() - 0.5) * 34;
+    // Fine short raindrop streak (0.16..0.28m)
+    const len = 0.16 + Math.random() * 0.12;
     const seed = Math.random() * 100;
 
-    // Top vertex & bottom vertex of streak (tilted by wind!)
     rainPos[i * 6] = rx;
     rainPos[i * 6 + 1] = ry;
     rainPos[i * 6 + 2] = rz;
-    rainPos[i * 6 + 3] = rx - 0.16;
+    rainPos[i * 6 + 3] = rx - 0.032;
     rainPos[i * 6 + 4] = ry - len;
-    rainPos[i * 6 + 5] = rz - 0.10;
+    rainPos[i * 6 + 5] = rz - 0.018;
 
     rainSeed[i * 2] = seed;
     rainSeed[i * 2 + 1] = seed;
@@ -154,7 +152,7 @@ export function buildAtmosphereSystem(
   const rainMat = new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
-    blending: THREE.AdditiveBlending,
+    blending: THREE.NormalBlending,
     uniforms: rainUniforms,
     vertexShader: `
       attribute float aSeed;
@@ -163,16 +161,15 @@ export function buildAtmosphereSystem(
       varying float vAlpha;
       void main() {
         vec3 p = position;
-        // Wrap drops seamlessly inside 44x24x44 volume around camera!
-        float fallSpeed = 24.0 + fract(aSeed * 0.37) * 6.0;
-        p.y = mod(p.y - uTime * fallSpeed + aSeed * 13.0, 24.0) - 4.0 + uPlayerPos.y;
-        p.x = mod(p.x - uTime * 3.8 - uPlayerPos.x + 22.0, 44.0) - 22.0 + uPlayerPos.x;
-        p.z = mod(p.z - uTime * 2.4 - uPlayerPos.z + 22.0, 44.0) - 22.0 + uPlayerPos.z;
+        float fallSpeed = 16.5 + fract(aSeed * 0.37) * 4.5;
+        p.y = mod(p.y - uTime * fallSpeed + aSeed * 13.0, 18.0) - 2.5 + uPlayerPos.y;
+        p.x = mod(p.x - uTime * 2.1 - uPlayerPos.x + 17.0, 34.0) - 17.0 + uPlayerPos.x;
+        p.z = mod(p.z - uTime * 1.2 - uPlayerPos.z + 17.0, 34.0) - 17.0 + uPlayerPos.z;
 
         vec4 mv = modelViewMatrix * vec4(p, 1.0);
         float dist = length(mv.xyz);
-        // Hide rain drops right inside camera near plane or far away
-        vAlpha = smoothstep(0.9, 2.5, dist) * (1.0 - smoothstep(14.0, 26.0, dist)) * 0.26;
+        // Subtle natural opacity fading smoothly near camera and past 17m
+        vAlpha = smoothstep(1.4, 3.2, dist) * (1.0 - smoothstep(10.0, 18.5, dist)) * (0.10 + fract(aSeed * 0.73) * 0.09);
         gl_Position = projectionMatrix * mv;
       }
     `,
@@ -180,7 +177,7 @@ export function buildAtmosphereSystem(
       uniform float uLightning;
       varying float vAlpha;
       void main() {
-        vec3 col = vec3(0.62, 0.70, 0.78) * (1.0 + uLightning * 1.4);
+        vec3 col = vec3(0.68, 0.74, 0.80) * (1.0 + uLightning * 0.55);
         gl_FragColor = vec4(col, vAlpha);
       }
     `,
@@ -214,10 +211,10 @@ export function buildAtmosphereSystem(
 
   const splashMat = new THREE.PointsMaterial({
     map: splashTex,
-    color: 0x9bb2c4,
-    size: 0.06,
+    color: 0xa2b4c2,
+    size: 0.032,
     transparent: true,
-    opacity: 0.35,
+    opacity: 0.22,
     depthWrite: false,
   });
   const splashes = new THREE.Points(splashGeo, splashMat);

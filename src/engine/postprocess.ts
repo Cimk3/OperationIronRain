@@ -313,39 +313,35 @@ export class PostProcessPipeline {
           return vp.xyz / vp.w;
         }
 
-        // Animated raindrop puddle ripple normal perturbation (subtle so SSR stays crisp!)
+        // Subtle raindrop puddle ripple normal perturbation for crisp SSR!
         vec2 ssrRipples(vec2 xz, float time) {
-          vec2 acc = vec2(
-            sin(xz.x * 4.2 + time * 1.9) * cos(xz.y * 3.8 - time * 1.4),
-            cos(xz.x * 3.9 - time * 1.5) * sin(xz.y * 4.5 + time * 2.0)
-          ) * 0.04;
+          vec2 acc = vec2(0.0);
           for (int i = 0; i < 2; i++) {
             float fi = float(i);
-            vec2 p = xz * (1.8 + fi * 0.9) + vec2(fi * 17.3, fi * 31.7);
+            vec2 p = xz * (2.6 + fi * 1.4) + vec2(fi * 17.3, fi * 31.7);
             vec2 cell = floor(p);
             vec2 f = fract(p) - 0.5;
             float h1 = fract(sin(dot(cell, vec2(127.1, 311.7))) * 43758.5453);
             float h2 = fract(sin(dot(cell, vec2(269.5, 183.3))) * 43758.5453);
-            vec2 c = (vec2(h1, h2) - 0.5) * 0.5;
+            vec2 c = (vec2(h1, h2) - 0.5) * 0.46;
             vec2 d = f - c;
             float dist = length(d);
-            float phase = fract(time * 1.45 + h1 * 4.0 + fi * 0.37);
-            float r = phase * 0.48;
-            float ring = exp(-pow((dist - r) * 24.0, 2.0)) * (1.0 - phase);
-            acc += (d / max(0.001, dist)) * sin((dist - r) * 60.0) * ring * 0.14;
+            float phase = fract(time * 1.35 + h1 * 5.0 + fi * 0.37);
+            float r = phase * 0.36;
+            float ring = exp(-pow((dist - r) * 34.0, 2.0)) * (1.0 - phase) * smoothstep(0.0, 0.14, phase);
+            acc += (d / max(0.002, dist)) * sin((dist - r) * 80.0) * ring * 0.08;
           }
           return acc;
         }
 
         vec3 sampleOvercastSky(vec3 dir, float time, float lightning) {
           float h = clamp(dir.y, 0.0, 1.0);
-          vec3 hor = vec3(0.085, 0.112, 0.145);
-          vec3 zen = vec3(0.025, 0.038, 0.058);
-          vec3 col = mix(hor, zen, pow(h, 0.58));
+          vec3 hor = vec3(0.22, 0.255, 0.295);
+          vec3 zen = vec3(0.085, 0.108, 0.138);
+          vec3 col = mix(hor, zen, pow(h, 0.62));
           float sunDot = max(0.0, dot(dir, normalize(uSunDir)));
-          col += vec3(0.32, 0.20, 0.09) * pow(sunDot, 6.0) * 0.45;
-          col += vec3(0.95, 0.70, 0.38) * smoothstep(0.996, 0.9995, sunDot);
-          col += vec3(0.55, 0.68, 0.95) * lightning * 0.65;
+          col += vec3(0.14, 0.155, 0.175) * pow(sunDot, 4.5) * 0.45;
+          col += vec3(0.45, 0.58, 0.80) * lightning * 0.55;
           return col;
         }
 
@@ -354,14 +350,14 @@ export class PostProcessPipeline {
           vec3 godRays = texture2D(tGodRays, vUv).rgb;
           float depth = texture2D(tDepth, vUv).r;
           if (depth >= 0.9999) {
-            gl_FragColor = vec4(hdr.rgb + godRays * 0.65, 1.0);
+            gl_FragColor = vec4(hdr.rgb + godRays * 0.20, 1.0);
             return;
           }
 
           vec3 col = hdr.rgb;
           if (uEnableGTAO > 0.5) {
             float ao = texture2D(tAO, vUv).r;
-            col *= mix(0.32, 1.0, ao);
+            col *= mix(0.46, 1.0, ao);
           }
 
           vec3 viewPos = getViewPos(vUv, depth);
@@ -462,24 +458,21 @@ export class PostProcessPipeline {
           }
 
           if (underground) {
-            // Moody indoor bunker dust haze (preserves bright colored alarms, cyan terminals & flashlights)
-            float indoorFog = 1.0 - exp(-viewDist * 0.0085);
-            vec3 indoorFogCol = vec3(0.014, 0.019, 0.026);
-            col = mix(col, indoorFogCol, clamp(indoorFog, 0.0, 0.72));
+            // Subtle crisp bunker air perspective (never hides industrial details in pitch-black fog!)
+            float indoorFog = 1.0 - exp(-viewDist * 0.0052);
+            vec3 indoorFogCol = vec3(0.022, 0.028, 0.034);
+            col = mix(col, indoorFogCol, clamp(indoorFog, 0.0, 0.44));
           } else {
-            // Cool-Blue Depth Fog + Gentle Warm Sun Backlight Mie Scattering
-            float distFog = 1.0 - exp(-viewDist * 0.0062);
-            float lowMist = exp(-max(0.0, worldPos.y - 1.2) * 0.16) * (1.0 - exp(-viewDist * 0.010)) * 0.16;
-            float fogFactor = clamp(max(distFog, lowMist), 0.0, 0.94);
+            // Restrained CoD4 Overcast Atmospheric Perspective (crystal clear 0..75m, soft misty mountain horizon!)
+            float distFog = 1.0 - exp(-max(0.0, viewDist - 12.0) * 0.0032);
+            float lowMist = exp(-max(0.0, worldPos.y - 1.0) * 0.22) * (1.0 - exp(-max(0.0, viewDist - 18.0) * 0.0045)) * 0.14;
+            float fogFactor = clamp(max(distFog, lowMist), 0.0, 0.78);
 
-            vec3 viewWorldDir = normalize(worldPos - uCamPos);
-            float sunScatter = pow(max(0.0, dot(viewWorldDir, normalize(uSunDir))), 6.5);
-            vec3 fogCol = vec3(0.072, 0.098, 0.128) + vec3(0.18, 0.12, 0.06) * sunScatter;
-            fogCol += vec3(0.45, 0.55, 0.78) * uLightning * 0.45;
+            vec3 fogCol = vec3(0.145, 0.172, 0.200) + vec3(0.28, 0.35, 0.48) * uLightning * 0.35;
             col = mix(col, fogCol, fogFactor);
 
-            // Add delicate Volumetric Sun Shafts cleanly over world & mid-fog
-            col += godRays * smoothstep(1.2, 8.0, viewDist) * 0.75;
+            // Very delicate overcast cloud-break scattering (zero hazy bloom washout!)
+            col += godRays * smoothstep(4.0, 22.0, viewDist) * 0.22;
           }
 
           if (any(isnan(col)) || any(isinf(col))) col = vec3(0.0);
@@ -493,7 +486,7 @@ export class PostProcessPipeline {
     this.brightMat = new THREE.ShaderMaterial({
       uniforms: {
         tSrc: { value: this.ssrCompositeRT.texture },
-        uThreshold: { value: 1.95 },
+        uThreshold: { value: 2.15 },
       },
       vertexShader: FULLSCREEN_VERT,
       fragmentShader: `
@@ -628,7 +621,7 @@ export class PostProcessPipeline {
     this.quality = q;
     this.ssrFogMat.uniforms.uEnableGTAO.value = q.enableGTAO ? 1.0 : 0.0;
     this.ssrFogMat.uniforms.uEnableSSR.value = q.enableSSR ? 1.0 : 0.0;
-    this.finalMat.uniforms.uBloomStrength.value = q.enableBloom ? 0.34 : 0.0;
+    this.finalMat.uniforms.uBloomStrength.value = q.enableBloom ? 0.24 : 0.0;
   }
 
   public resize(cssW: number, cssH: number, dpr: number): void {

@@ -9,7 +9,9 @@ import { EnemyManager } from './gameplay/enemies';
 import { loadPlayerLoadout } from './gameplay/loadouts';
 import { PlayerController } from './gameplay/player';
 import { ViewmodelController } from './gameplay/viewmodel';
+import { EnvironmentPBRAtlas, getEnvironmentPBRAtlas } from './proc/pbrGenerator';
 import { getTextureLibrary, TextureLibrary } from './proc/textures';
+import { AssetShowcase } from './showcase/AssetShowcase';
 import { GunsmithController } from './ui/gunsmith';
 import {
   GamePhase,
@@ -68,6 +70,7 @@ class IronRainGame {
 
   private phase: GamePhase = 'menu';
   private audio = new ProceduralAudioEngine();
+  private envAtlas!: EnvironmentPBRAtlas;
   private textures!: TextureLibrary;
   private terrainData!: TerrainWorkerOutput;
   private terrain!: BattlefieldTerrain;
@@ -77,7 +80,9 @@ class IronRainGame {
   private outpost!: OutpostSystem;
   private csm!: CSM;
   private hemiLight!: THREE.HemisphereLight;
+  private bounceLight!: THREE.DirectionalLight;
   private postProcess!: PostProcessPipeline;
+  private vramEstimateMB = 0;
   private viewmodel!: ViewmodelController;
   private gunsmith!: GunsmithController;
   private playerLoadout: PlayerLoadoutSave = loadPlayerLoadout();
@@ -230,38 +235,52 @@ class IronRainGame {
       worker.postMessage({ gridSize: 513, worldSize: 250, seed: 4219 });
     });
 
-    this.ui.loadingText.textContent = '正在合成 2048×2048 PBR 贴图与高精度枪械...';
+    this.ui.loadingText.textContent = '正在合成 1024×1024 环境 PBR 材质与高精度枪械...';
     await new Promise((r) => setTimeout(r, 10));
 
-    // 2. Generate all 1024/2048 procedural PBR texture sets
-    this.textures = getTextureLibrary(this.renderer);
+    // 2. Generate unified procedural PBR environment atlas + weapon/character texture library
+    this.envAtlas = getEnvironmentPBRAtlas(this.renderer, 1024, 1024);
+    this.textures = getTextureLibrary(this.renderer, this.envAtlas);
 
-    // 3. Setup Quality, CSM, Hemisphere IBL & Atmosphere
+    // 3. Setup Quality, Overcast CSM, Hemisphere IBL, Bounce Light & Atmosphere
     const q = QUALITY_CONFIGS[this.settings.quality];
-    this.terrain = new BattlefieldTerrain(this.terrainData, this.textures);
+    const overcastSunDir = new THREE.Vector3(-0.34, 0.56, -0.75).normalize();
+    const overcastSunCol = new THREE.Color(0xcbd6df);
+    this.initCSM(q.csmCascades, q.csmMapSize, overcastSunDir, overcastSunCol);
+
+    this.terrain = new BattlefieldTerrain(this.terrainData, this.envAtlas, this.renderer, this.csm);
+    this.scene.add(this.terrain.mesh);
+
     this.atmosphere = buildAtmosphereSystem(q, this.terrain);
     this.scene.add(this.atmosphere.group);
     this.scene.environment = this.atmosphere.generateEnvMap(this.renderer);
 
-    this.hemiLight = new THREE.HemisphereLight(0x425b78, 0x171b18, 0.95);
+    // CoD4 overcast ambient fill: cool slate sky dome + damp olive-grey earth bounce
+    this.hemiLight = new THREE.HemisphereLight(0x92a6ba, 0x35372f, 1.38);
     this.scene.add(this.hemiLight);
 
-    this.initCSM(q.csmCascades, q.csmMapSize);
+    // Subtle opposite-side indirect sky/ground bounce directional light (eliminates pitch-black backsides)
+    this.bounceLight = new THREE.DirectionalLight(0x637078, 0.36);
+    this.bounceLight.position.set(16, 12, 24);
+    this.scene.add(this.bounceLight);
 
-    // Re-wire terrain with CSM safely chaining triplanar shader!
-    this.scene.remove(this.terrain.mesh);
-    this.terrain = new BattlefieldTerrain(this.terrainData, this.textures, this.csm);
-    this.scene.add(this.terrain.mesh);
-
-    // 4. Vegetation & Military Outpost
-    this.vegetation = buildVegetationSystem(this.terrainData, this.terrain, this.textures, q, this.csm);
+    // 4. Vegetation (3D multi-segment grass, L-system trees, fractured rocks) & Military Outpost
+    this.vegetation = buildVegetationSystem(
+      this.terrainData,
+      this.terrain,
+      this.textures,
+      this.envAtlas,
+      q,
+      this.atmosphere.sunDirection,
+      this.csm
+    );
     this.scene.add(this.vegetation.group);
 
     this.outpost = buildMilitaryOutpost(this.terrain, this.textures, this.csm);
     this.scene.add(this.outpost.group);
 
-    // 4b. Level 2 Underground Missile Silo Facility (hidden while playing Level 1)
-    this.silo = new SiloWorld(this.textures, this.csm);
+    // 4b. Level 2 Underground Missile Silo Facility (modular industrial architecture)
+    this.silo = new SiloWorld(this.textures, this.envAtlas, this.csm);
     this.silo.group.visible = false;
     this.scene.add(this.silo.group);
 
@@ -272,8 +291,8 @@ class IronRainGame {
     this.viewmodel = new ViewmodelController(this.textures);
     this.viewmodel.applyLoadouts(this.playerLoadout, true);
     this.viewmodelScene.environment = this.scene.environment;
-    this.vmHemiLight = new THREE.HemisphereLight(0x4f6885, 0x1e221e, 0.95);
-    this.vmSunLight = new THREE.DirectionalLight(0xe6c496, 1.85);
+    this.vmHemiLight = new THREE.HemisphereLight(0x8fa4b8, 0x2c302a, 1.15);
+    this.vmSunLight = new THREE.DirectionalLight(0xd4dce4, 1.18);
     this.viewmodelScene.add(this.vmHemiLight);
     this.viewmodelScene.add(this.vmSunLight);
     this.viewmodelScene.add(this.viewmodel.root);
@@ -326,6 +345,17 @@ class IronRainGame {
     this.handleResize();
 
     this.buildDurationMs = Math.round(performance.now() - t0);
+    // Honest VRAM accounting: procedural PBR textures + packed terrain + foliage + shadow maps + HDR RTs
+    const csmBytes = q.csmCascades * q.csmMapSize * q.csmMapSize * 4;
+    const rtBytes = Math.round(window.innerWidth * window.innerHeight * 32); // RGBA16F scene + depth + GTAO/SSR/Bloom
+    const totalVramBytes =
+      this.envAtlas.totalVramBytes +
+      this.textures.vramBytes +
+      this.terrain.packVramBytes +
+      this.vegetation.vramExtraBytes +
+      csmBytes +
+      rtBytes;
+    this.vramEstimateMB = Math.round(totalVramBytes / (1024 * 1024));
     this.worldReady = true;
     this.ui.loadingStatus.classList.add('hidden');
     this.ui.btnStart.disabled = false;
@@ -342,11 +372,11 @@ class IronRainGame {
 
     const techEl = document.getElementById('menu-tech-info');
     if (techEl) {
-      techEl.textContent = `M4A1 ${m4Tris.toLocaleString()} | AR15 ${ar15Tris.toLocaleString()} | M7 ${m7Tris.toLocaleString()} | MP5SD ${mp5Tris.toLocaleString()} | M1911 ${pTris.toLocaleString()} | Arms ${armTris.toLocaleString()} | Init ${this.buildDurationMs}ms`;
+      techEl.textContent = `M4A1 ${m4Tris.toLocaleString()} | AR15 ${ar15Tris.toLocaleString()} | M7 ${m7Tris.toLocaleString()} | MP5SD ${mp5Tris.toLocaleString()} | VRAM ~${this.vramEstimateMB}MB | Init ${this.buildDurationMs}ms`;
     }
 
     console.info(
-      `[IronRain] Ready in ${this.buildDurationMs}ms | M4A1=${m4Tris} | AR15=${ar15Tris} | M7=${m7Tris} | MP5SD=${mp5Tris} | M1911=${pTris} | Arms=${armTris} | Soldier=${soldierTris}`
+      `[IronRain] Ready in ${this.buildDurationMs}ms | VRAM~${this.vramEstimateMB}MB (EnvPBR=${Math.round(this.envAtlas.totalVramBytes / 1048576)}MB, Lib=${Math.round(this.textures.vramBytes / 1048576)}MB) | TreeAvg=${treeTris} | GroundInst=${groundInst}`
     );
 
     // Expose read-only telemetry for inspection & verification
@@ -358,6 +388,8 @@ class IronRainGame {
         fps: this.currentFps,
         drawCalls: this.postProcess.lastSceneDrawCalls,
         resolution: this.postProcess.getResolutionInfo(),
+        vramMB: this.vramEstimateMB,
+        envPbrGenMs: Math.round(this.envAtlas.genTimeMs),
         m4a1Tris: m4Tris,
         ar15Tris,
         m7Tris,
@@ -412,7 +444,12 @@ class IronRainGame {
     };
   }
 
-  private initCSM(cascades: number, mapSize: number): void {
+  private initCSM(
+    cascades: number,
+    mapSize: number,
+    sunDirection: THREE.Vector3,
+    sunLightColor: THREE.Color
+  ): void {
     if (this.csm) {
       this.csm.remove();
       this.csm.dispose();
@@ -424,8 +461,8 @@ class IronRainGame {
       parent: this.scene,
       shadowMapSize: mapSize,
       shadowBias: -0.00012,
-      lightDirection: this.atmosphere.sunDirection.clone().negate(),
-      lightIntensity: 2.1,
+      lightDirection: sunDirection.clone().negate(),
+      lightIntensity: 0.95,
       lightNear: 1,
       lightFar: 320,
       lightMargin: 45,
@@ -433,7 +470,7 @@ class IronRainGame {
     });
     this.csm.fade = true;
     this.csm.lights.forEach((light, idx) => {
-      light.color.copy(this.atmosphere.sunLightColor);
+      light.color.copy(sunLightColor);
       light.shadow.normalBias = 0.015 + idx * 0.018;
     });
   }
@@ -858,6 +895,20 @@ class IronRainGame {
             this.player.yaw = Math.PI;
             this.player.pitch = 0.08;
             this.player.hp = 100;
+          } else if (e.code === 'F11' && this.currentLevel === 'level2') {
+            e.preventDefault();
+            this.player.position.set(-0.4, -8.0, 29.0);
+            this.player.yaw = 0.08;
+            this.player.pitch = -0.04;
+            this.player.hp = 100;
+          } else if (e.code === 'F6' && this.currentLevel === 'level1') {
+            e.preventDefault();
+            // Close-up woodland terrain, grass, puddle, rocks & L-system trees inspection
+            const y = this.terrain.getHeightAt(-6.0, 58.0);
+            this.player.position.set(-6.0, y, 58.0);
+            this.player.yaw = -0.22;
+            this.player.pitch = -0.14;
+            this.player.hp = 100;
           }
         }
       } else if (this.phase === 'paused' && e.code === 'KeyP') {
@@ -1203,7 +1254,7 @@ class IronRainGame {
     this.ui.damageVig.style.opacity = String(Math.min(1, Math.max(this.damageFlash, lowHpVig)));
 
     this.ui.fpsCounter.textContent = `${this.currentFps} FPS`;
-    this.ui.resInfo.textContent = `${this.postProcess.getResolutionInfo()} | ${this.postProcess.lastSceneDrawCalls} DC`;
+    this.ui.resInfo.textContent = `${this.postProcess.getResolutionInfo()} | ${this.postProcess.lastSceneDrawCalls} DC | ~${this.vramEstimateMB}MB`;
   }
 
   private loop = (): void => {
@@ -1246,11 +1297,13 @@ class IronRainGame {
     }
     const flash = isUnderground ? 0 : this.atmosphere.lightningFlash;
     this.csm.lights.forEach((l, idx) => {
-      l.intensity = isUnderground ? 0.06 : isL2 ? 0.55 + flash * 1.4 : 2.1 + flash * 2.4;
+      // CoD4 overcast sky: soft diffused key light (no harsh nuclear sunlight!)
+      l.intensity = isUnderground ? 0.04 : isL2 ? 0.48 + flash * 1.1 : 0.96 + flash * 1.7;
       // Strict <= 2 real-time shadow lights in Level 2 (only flashlight + 1 exterior sun cascade when outside!)
       l.castShadow = isL2 ? !isUnderground && idx === 0 : true;
     });
-    this.hemiLight.intensity = isUnderground ? 0.14 : isL2 ? 0.35 + flash * 0.25 : 0.92 + flash * 0.45;
+    this.hemiLight.intensity = isUnderground ? 0.56 : isL2 ? 0.54 + flash * 0.25 : 1.38 + flash * 0.42;
+    this.bounceLight.intensity = isUnderground ? 0.22 : isL2 ? 0.24 : 0.36;
 
     if (isL2) {
       const refPos = this.phase === 'playing' ? this.player.position : this.camera.position;
@@ -1351,8 +1404,8 @@ class IronRainGame {
       }
       const invCamQ = this.camera.quaternion.clone().invert();
       this.vmSunLight.position.copy(this.atmosphere.sunDirection).multiplyScalar(10).applyQuaternion(invCamQ);
-      this.vmSunLight.intensity = isUnderground ? 0.55 + (this.flashlightOn ? 0.65 : 0) : 1.85 + flash * 2.0;
-      this.vmHemiLight.intensity = isUnderground ? 0.52 + (this.flashlightOn ? 0.35 : 0) : 0.95 + flash * 0.40;
+      this.vmSunLight.intensity = isUnderground ? 0.52 + (this.flashlightOn ? 0.65 : 0) : 1.15 + flash * 1.35;
+      this.vmHemiLight.intensity = isUnderground ? 0.62 + (this.flashlightOn ? 0.35 : 0) : 1.15 + flash * 0.35;
 
       // Shelter / Underground Audio Occlusion & Reverb Check + Low-HP Heartbeat
       this.shelterTimer -= dt;
@@ -1466,4 +1519,8 @@ class IronRainGame {
   };
 }
 
-new IronRainGame();
+if (window.location.search.includes('showcase=1')) {
+  new AssetShowcase(document.getElementById('game-canvas') as HTMLCanvasElement);
+} else {
+  new IronRainGame();
+}

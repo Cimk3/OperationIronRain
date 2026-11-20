@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { fbm2D, ridged2D, voronoi2D } from './noise';
+import type { EnvironmentPBRAtlas } from './pbrGenerator';
 
 export interface PBRTextureSet {
   map: THREE.DataTexture;
@@ -34,6 +35,7 @@ export interface TextureLibrary {
   fernAlpha: THREE.DataTexture;
   fernNormal: THREE.DataTexture;
   maxAnisotropy: number;
+  vramBytes: number;
 }
 
 function makeDataTex(
@@ -1268,38 +1270,114 @@ function generateFernTextures(aniso: number): { alpha: THREE.DataTexture; normal
   return { alpha, normal };
 }
 
+function calcTextureVramBytes(tex: THREE.DataTexture | undefined): number {
+  if (!tex || !tex.image) return 0;
+  const img = tex.image as { width?: number; height?: number };
+  const w = img.width ?? 0;
+  const h = img.height ?? 0;
+  // RGBA8 + 33% mipmap chain
+  return Math.round(w * h * 4 * 1.333);
+}
+
+function calcSetVramBytes(set: PBRTextureSet): number {
+  return (
+    calcTextureVramBytes(set.map) +
+    calcTextureVramBytes(set.normalMap) +
+    calcTextureVramBytes(set.roughnessMap) +
+    calcTextureVramBytes(set.metalnessMap) +
+    calcTextureVramBytes(set.aoMap) +
+    calcTextureVramBytes(set.heightMap)
+  );
+}
+
 let cachedLibrary: TextureLibrary | null = null;
 
-export function getTextureLibrary(renderer: THREE.WebGLRenderer): TextureLibrary {
+export function getTextureLibrary(
+  renderer: THREE.WebGLRenderer,
+  envAtlas?: EnvironmentPBRAtlas
+): TextureLibrary {
   if (cachedLibrary) return cachedLibrary;
   const maxAnisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
-  const foliage = generateFoliageTextures(maxAnisotropy);
-  const fern = generateFernTextures(maxAnisotropy);
+
+  const gunMetal = generateGunMetal(maxAnisotropy);
+  const gunPolymer = generateGunPolymer(maxAnisotropy);
+  const walnutWood = generateWalnutWood(maxAnisotropy);
+  const tacticalFabric = generateTacticalFabric(maxAnisotropy);
+  const hazardTrim = generateHazardTrim(maxAnisotropy);
+  const sandbagBurlap = generateSandbagBurlap(maxAnisotropy);
+  const bark = generateBark(maxAnisotropy);
+  const soldierCamo = generateSoldierCamo(maxAnisotropy);
+  const soldierGear = generateSoldierGear(maxAnisotropy);
+
+  // When the new EnvironmentPBRAtlas is provided, reuse its ground & industrial PBR packs
+  // directly instead of duplicating ~160MB of legacy terrain/concrete/metal textures!
+  const terrainGrass = envAtlas ? envAtlas.groundForest : generateTerrainGrass(maxAnisotropy);
+  const terrainMud = envAtlas ? envAtlas.groundMud : generateTerrainMud(maxAnisotropy);
+  const terrainGravel = envAtlas ? envAtlas.groundGravel : generateTerrainGravel(maxAnisotropy);
+  const terrainRock = envAtlas ? envAtlas.groundRock : generateTerrainRock(maxAnisotropy);
+  const concrete = envAtlas ? envAtlas.industrialConcrete : generateConcrete(maxAnisotropy);
+  const siloWallConcrete = envAtlas ? envAtlas.industrialConcrete : generateSiloWallConcrete(maxAnisotropy);
+  const siloFloorConcrete = envAtlas ? envAtlas.industrialFloor : generateSiloFloorConcrete(maxAnisotropy);
+  const industrialMetal = envAtlas ? envAtlas.paintedMetal : generateIndustrialMetal(maxAnisotropy);
+
+  const dummy1x1 = envAtlas
+    ? makeDataTex(new Uint8Array([255, 255, 255, 255]), 1, false, 1, 1)
+    : null;
+  const foliage = envAtlas ? { alpha: dummy1x1!, normal: dummy1x1! } : generateFoliageTextures(maxAnisotropy);
+  const fern = envAtlas ? { alpha: dummy1x1!, normal: dummy1x1! } : generateFernTextures(maxAnisotropy);
+
+  let vramBytes =
+    calcSetVramBytes(gunMetal) +
+    calcSetVramBytes(gunPolymer) +
+    calcSetVramBytes(walnutWood) +
+    calcSetVramBytes(tacticalFabric) +
+    calcSetVramBytes(hazardTrim) +
+    calcSetVramBytes(sandbagBurlap) +
+    calcSetVramBytes(bark) +
+    calcSetVramBytes(soldierCamo) +
+    calcSetVramBytes(soldierGear);
+
+  if (!envAtlas) {
+    vramBytes +=
+      calcSetVramBytes(terrainGrass) +
+      calcSetVramBytes(terrainMud) +
+      calcSetVramBytes(terrainGravel) +
+      calcSetVramBytes(terrainRock) +
+      calcSetVramBytes(concrete) +
+      calcSetVramBytes(siloWallConcrete) +
+      calcSetVramBytes(siloFloorConcrete) +
+      calcSetVramBytes(industrialMetal) +
+      calcTextureVramBytes(foliage.alpha) +
+      calcTextureVramBytes(foliage.normal) +
+      calcTextureVramBytes(fern.alpha) +
+      calcTextureVramBytes(fern.normal);
+  }
 
   cachedLibrary = {
-    gunMetal: generateGunMetal(maxAnisotropy),
-    gunPolymer: generateGunPolymer(maxAnisotropy),
-    walnutWood: generateWalnutWood(maxAnisotropy),
-    tacticalFabric: generateTacticalFabric(maxAnisotropy),
-    terrainGrass: generateTerrainGrass(maxAnisotropy),
-    terrainMud: generateTerrainMud(maxAnisotropy),
-    terrainGravel: generateTerrainGravel(maxAnisotropy),
-    terrainRock: generateTerrainRock(maxAnisotropy),
-    concrete: generateConcrete(maxAnisotropy),
-    siloWallConcrete: generateSiloWallConcrete(maxAnisotropy),
-    siloFloorConcrete: generateSiloFloorConcrete(maxAnisotropy),
-    hazardTrim: generateHazardTrim(maxAnisotropy),
-    industrialMetal: generateIndustrialMetal(maxAnisotropy),
-    woodPlank: generateWalnutWood(maxAnisotropy),
-    sandbagBurlap: generateSandbagBurlap(maxAnisotropy),
-    bark: generateBark(maxAnisotropy),
-    soldierCamo: generateSoldierCamo(maxAnisotropy),
-    soldierGear: generateSoldierGear(maxAnisotropy),
+    gunMetal,
+    gunPolymer,
+    walnutWood,
+    tacticalFabric,
+    terrainGrass,
+    terrainMud,
+    terrainGravel,
+    terrainRock,
+    concrete,
+    siloWallConcrete,
+    siloFloorConcrete,
+    hazardTrim,
+    industrialMetal,
+    woodPlank: walnutWood,
+    sandbagBurlap,
+    bark,
+    soldierCamo,
+    soldierGear,
     foliageAlpha: foliage.alpha,
     foliageNormal: foliage.normal,
     fernAlpha: fern.alpha,
     fernNormal: fern.normal,
     maxAnisotropy,
+    vramBytes,
   };
   return cachedLibrary;
 }

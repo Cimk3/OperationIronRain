@@ -1,7 +1,25 @@
 import * as THREE from 'three';
 import { CSM } from 'three/examples/jsm/csm/CSM.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import {
+  appendBoltedGusset,
+  appendCommandConsole,
+  appendDetailedCableTray,
+  appendDetailedPipeRun,
+  appendGratingPlatform,
+  appendIBeam,
+  appendIndustrialArchPortal,
+  appendIndustrialGuardrail,
+  appendIndustrialLightFixture,
+  appendPowerCabinet,
+  appendTurbineGenerator,
+  appendVentilationDuct,
+  BatchPushFn,
+  createIndustrialMaterials,
+  IndustrialMatKey,
+} from '../proc/industrialModules';
 import { createChamferedBox, createLatheZ } from '../proc/modeling';
+import { EnvironmentPBRAtlas } from '../proc/pbrGenerator';
 import { TextureLibrary } from '../proc/textures';
 import { MaterialId } from '../types';
 import { BoxCollider } from './outpost';
@@ -166,7 +184,7 @@ export class SiloWorld {
   private zones: Record<ZoneKey, THREE.Group>;
   private floorZones: FloorZone[] = [];
   private dynamicLights: DynamicPointLight[] = [];
-  private pipeRedMat!: THREE.MeshStandardMaterial;
+  private pipeRedMat!: THREE.Material;
 
   // Match BattlefieldTerrain readonly props used by PostProcessPipeline
   public readonly gridSize = 257;
@@ -175,7 +193,7 @@ export class SiloWorld {
   public readonly waterDepth = new Float32Array(257 * 257);
   public readonly wetness = new Float32Array(257 * 257);
 
-  constructor(textures: TextureLibrary, csm?: CSM) {
+  constructor(textures: TextureLibrary, envAtlas: EnvironmentPBRAtlas, csm?: CSM) {
     this.group.name = 'UndergroundSiloWorld';
     this.mesh = new THREE.Group();
     this.mesh.name = 'SiloArchitecture';
@@ -196,100 +214,35 @@ export class SiloWorld {
       this.zones.escape
     );
 
-    const concreteMat = new THREE.MeshStandardMaterial({
-      map: textures.siloWallConcrete.map,
-      normalMap: textures.siloWallConcrete.normalMap,
-      normalScale: new THREE.Vector2(1.55, 1.55),
-      roughnessMap: textures.siloWallConcrete.roughnessMap,
-      aoMap: textures.siloWallConcrete.aoMap,
-      color: 0xc2c8cc,
-      roughness: 0.92,
-      metalness: 0.05,
-      side: THREE.DoubleSide,
-    });
-
-    const floorMat = new THREE.MeshStandardMaterial({
-      map: textures.siloFloorConcrete.map,
-      normalMap: textures.siloFloorConcrete.normalMap,
-      normalScale: new THREE.Vector2(1.4, 1.4),
-      roughnessMap: textures.siloFloorConcrete.roughnessMap,
-      aoMap: textures.siloFloorConcrete.aoMap,
-      color: 0xb0b6bc,
-      roughness: 0.90,
-      metalness: 0.08,
-    });
-
-    const hazardMat = new THREE.MeshStandardMaterial({
-      map: textures.hazardTrim.map,
-      normalMap: textures.hazardTrim.normalMap,
-      roughnessMap: textures.hazardTrim.roughnessMap,
-      aoMap: textures.hazardTrim.aoMap,
-      color: 0xffffff,
-      roughness: 0.65,
-      metalness: 0.14,
-    });
-
-    const steelMat = new THREE.MeshStandardMaterial({
-      map: textures.industrialMetal.map,
-      normalMap: textures.industrialMetal.normalMap,
-      roughnessMap: textures.industrialMetal.roughnessMap,
-      metalnessMap: textures.industrialMetal.metalnessMap,
-      color: 0x9aa2aa,
-      roughness: 0.48,
-      metalness: 0.82,
-    });
-
-    const darkSteelMat = new THREE.MeshStandardMaterial({
-      map: textures.gunMetal.map,
-      normalMap: textures.gunMetal.normalMap,
-      roughnessMap: textures.gunMetal.roughnessMap,
-      color: 0x454c54,
-      roughness: 0.42,
-      metalness: 0.88,
-    });
-
-    const catwalkMat = new THREE.MeshStandardMaterial({
-      map: textures.gunMetal.map,
-      normalMap: textures.gunMetal.normalMap,
-      roughnessMap: textures.gunMetal.roughnessMap,
-      color: 0x6b7278,
-      roughness: 0.45,
-      metalness: 0.86,
-    });
-
-    this.pipeRedMat = new THREE.MeshStandardMaterial({ color: 0x9e2824, roughness: 0.36, metalness: 0.68 });
-    const pipeYellowMat = new THREE.MeshStandardMaterial({ color: 0xc29224, roughness: 0.38, metalness: 0.62 });
-    const pipeBlueMat = new THREE.MeshStandardMaterial({ color: 0x2a6596, roughness: 0.34, metalness: 0.70 });
-    const cableMat = new THREE.MeshStandardMaterial({ color: 0x16191d, roughness: 0.72, metalness: 0.15 });
-    const handrailMat = new THREE.MeshStandardMaterial({ color: 0xc89a28, roughness: 0.36, metalness: 0.76 });
-    const ledGreenMat = new THREE.MeshBasicMaterial({ color: 0x22ee66 });
-    const ledCyanMat = new THREE.MeshBasicMaterial({ color: 0x33ddff });
+    // 5+ Independent Procedural Industrial PBR Materials (Concrete, Painted Metal, Bare Steel, Rubber, Industrial Floor, Grating)
+    const indMats = createIndustrialMaterials(envAtlas, textures.hazardTrim, csm);
+    const concreteMat = indMats.concrete;
+    const floorMat = indMats.floor;
+    const hazardMat = indMats.hazardYellow;
+    const steelMat = indMats.paintedMetal;
+    const darkSteelMat = indMats.bareSteel;
+    const catwalkMat = indMats.bareSteel;
+    this.pipeRedMat = indMats.pipeRed;
+    const pipeYellowMat = indMats.pipeYellow;
+    const pipeBlueMat = indMats.pipeBlue;
+    const cableMat = indMats.rubber;
+    const handrailMat = indMats.pipeYellow;
+    const ledGreenMat = indMats.emissiveGreen;
+    const ledCyanMat = indMats.emissiveCyan;
     const unlitBulbMat = new THREE.MeshStandardMaterial({ color: 0x383e42, roughness: 0.25 });
 
     const warmGlowMat = new THREE.MeshBasicMaterial({
-      map: makeFloorGlowTexture('rgba(255, 175, 80, 0.38)'),
+      map: makeFloorGlowTexture('rgba(255, 175, 80, 0.34)'),
       transparent: true,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
     });
     const coolGlowMat = new THREE.MeshBasicMaterial({
-      map: makeFloorGlowTexture('rgba(155, 215, 255, 0.30)'),
+      map: makeFloorGlowTexture('rgba(155, 215, 255, 0.28)'),
       transparent: true,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
     });
-
-    if (csm) {
-      csm.setupMaterial(concreteMat);
-      csm.setupMaterial(floorMat);
-      csm.setupMaterial(hazardMat);
-      csm.setupMaterial(steelMat);
-      csm.setupMaterial(darkSteelMat);
-      csm.setupMaterial(catwalkMat);
-      csm.setupMaterial(this.pipeRedMat);
-      csm.setupMaterial(pipeYellowMat);
-      csm.setupMaterial(pipeBlueMat);
-    }
 
     // Per-Zone Geometry Batcher -> crushes hundreds of small parts into <= 10 merged Draw Calls per zone!
     const zoneBuckets: Record<ZoneKey, Map<string, BatchBucket>> = {
@@ -587,6 +540,13 @@ export class SiloWorld {
       }
     };
 
+    const makeIndSink = (zoneKey: ZoneKey): BatchPushFn => {
+      return (matKey: IndustrialMatKey, geo: THREE.BufferGeometry, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0) => {
+        const colMat = matKey === 'concrete' || matKey === 'floor' ? MaterialId.CONCRETE : MaterialId.METAL;
+        pushBatch(zoneKey, geo, indMats[matKey], colMat, x, y, z, rx, ry, rz, matKey === 'floor', false);
+      };
+    };
+
     const addArchFrame = (
       zoneKey: ZoneKey,
       cx: number,
@@ -598,31 +558,17 @@ export class SiloWorld {
       rightPilaster = true,
       tiltX = 0
     ) => {
-      const half = spanWidth * 0.5;
-      const pilGeo = createChamferedBox(0.34, clearH, 0.38, 0.025, 2, 2);
-      const shoeGeo = createChamferedBox(0.40, 0.32, 0.46, 0.02, 2, 2);
-      const topBeam = createChamferedBox(spanWidth, 0.28, 0.34, 0.02, 2, 2);
-
-      const placeLocal = (lx: number, ly: number, lz: number): [number, number, number] => {
-        const cosX = Math.cos(tiltX);
-        const sinX = Math.sin(tiltX);
-        return [cx + lx, yFloor + ly * cosX - lz * sinX, z + ly * sinX + lz * cosX];
-      };
-
-      if (leftPilaster) {
-        const [px, py, pz] = placeLocal(-half + 0.17, clearH * 0.5, 0);
-        pushBatch(zoneKey, pilGeo, concreteMat, MaterialId.CONCRETE, px, py, pz, tiltX);
-        const [sx, sy, sz] = placeLocal(-half + 0.17, 0.16, 0);
-        pushBatch(zoneKey, shoeGeo, darkSteelMat, MaterialId.METAL, sx, sy, sz, tiltX);
-      }
-      if (rightPilaster) {
-        const [px, py, pz] = placeLocal(half - 0.17, clearH * 0.5, 0);
-        pushBatch(zoneKey, pilGeo, concreteMat, MaterialId.CONCRETE, px, py, pz, tiltX);
-        const [sx, sy, sz] = placeLocal(half - 0.17, 0.16, 0);
-        pushBatch(zoneKey, shoeGeo, darkSteelMat, MaterialId.METAL, sx, sy, sz, tiltX);
-      }
-      const [bx, by, bz] = placeLocal(0, clearH - 0.12, 0);
-      pushBatch(zoneKey, topBeam, darkSteelMat, MaterialId.METAL, bx, by, bz, tiltX);
+      appendIndustrialArchPortal(
+        makeIndSink(zoneKey),
+        cx,
+        yFloor,
+        z,
+        spanWidth,
+        clearH,
+        leftPilaster,
+        rightPilaster,
+        tiltX
+      );
     };
 
     const addWallSconce = (
@@ -1074,17 +1020,24 @@ export class SiloWorld {
     addBox('corridors', 7.2, -6.2, 1.7, 9.8, 4.2, 0.6, concreteMat);
     addHazardStrip('corridors', 11.48, -7.89, 10, 0.04, 0.22, 16);
 
-    // Turbine Generators & Crates (with full solid BoxColliders & industrial silhouette!)
-    addBox('corridors', 7.6, -7.85, 10, 2.8, 0.3, 6.2, darkSteelMat, MaterialId.METAL, false);
-    addHazardStrip('corridors', 6.18, -7.84, 10, 0.05, 0.24, 6.0);
-    addBox('corridors', 7.6, -6.7, 10, 2.1, 2.0, 5.2, steelMat, MaterialId.METAL, true, false, false);
-    const turbDrum = createLatheZ([[0.68, -2.35], [0.76, -2.0], [0.76, 2.0], [0.68, 2.35]], 16);
-    pushBatch('corridors', turbDrum, darkSteelMat, MaterialId.METAL, 7.6, -5.65, 10);
-    pushBatch('corridors', new THREE.CylinderGeometry(0.16, 0.18, 1.35, 10), pipeYellowMat, MaterialId.METAL, 7.6, -5.0, 8.2);
-    pushBatch('corridors', new THREE.CylinderGeometry(0.16, 0.18, 1.35, 10), pipeYellowMat, MaterialId.METAL, 7.6, -5.0, 11.8);
-    addBox('corridors', 10.6, -6.9, 6.5, 0.9, 2.2, 1.4, darkSteelMat, MaterialId.METAL, true, false, false);
-    pushBatch('corridors', new THREE.BoxGeometry(0.06, 0.45, 0.75), ledCyanMat, MaterialId.METAL, 10.12, -6.35, 6.5);
-    addBox('corridors', 4.5, -7.45, 13.8, 1.1, 1.1, 1.1, darkSteelMat, MaterialId.METAL, true, false, false);
+    // Detailed Ribbed Turbine Generator Assembly + Switchgear Cabinet + Cover (exact original colliders preserved!)
+    const corSink = makeIndSink('corridors');
+    appendTurbineGenerator(corSink, 7.6, -8.0, 10.0, 0);
+    this.colliders.push({
+      box: new THREE.Box3(new THREE.Vector3(6.4, -8.0, 7.2), new THREE.Vector3(8.8, -5.4, 12.8)),
+      material: MaterialId.METAL,
+      blocksSight: true,
+    });
+    appendPowerCabinet(corSink, 10.6, -8.0, 6.5, -Math.PI * 0.5, 1.3, 2.1, 0.85);
+    this.colliders.push({
+      box: new THREE.Box3(new THREE.Vector3(10.1, -8.0, 5.8), new THREE.Vector3(11.1, -5.8, 7.2)),
+      material: MaterialId.METAL,
+      blocksSight: true,
+    });
+    appendVentilationDuct(corSink, 0.0, -4.62, -20.5, 32.5, 0.62, 0.30, -4.5);
+    appendVentilationDuct(corSink, 5.4, -4.62, 3.0, 17.0, 0.68, 0.34, -4.5);
+
+    addBox('corridors', 4.5, -7.45, 13.8, 1.1, 1.1, 1.1, steelMat, MaterialId.METAL, true, false, false);
     addBox('corridors', -1.6, -7.45, 20, 1.3, 1.1, 0.85, concreteMat, MaterialId.CONCRETE, true, false);
     addBox('corridors', 1.6, -7.45, 0, 1.3, 1.1, 0.85, concreteMat, MaterialId.CONCRETE, true, false);
     addBox('corridors', -1.5, -7.45, -10, 1.2, 1.0, 1.0, steelMat, MaterialId.METAL, true, false, false);
@@ -1240,108 +1193,193 @@ export class SiloWorld {
     buildBlastBulkhead('silo', 0, -8.0, -22.25, 5.5, 3.6, 0, 0x38b6ff);
     buildBlastBulkhead('silo', 18.25, -8.0, -33.5, 5.0, 3.6, Math.PI * 0.5, 0xff2a2a);
 
+    // =========================================================================
+    // ZONE 3 HIGH-DETAIL INDUSTRIAL SILO HALL ARCHITECTURE (True I-Beam Truss Gantry,
+    // Perforated Grating Balcony, Open Tubular Guardrails, Detailed ICBM, Console & High-Bay Fixtures!)
+    // =========================================================================
+    const siloSink = makeIndSink('silo');
+
+    // Structural Wall Buttress I-Beam Columns & Vertical Utility Pipes
     for (const wx of [-12, 12]) {
-      addBox('silo', wx, 0, -22.7, 0.65, 20, 0.55, darkSteelMat, MaterialId.METAL, false);
-      addBox('silo', wx, 0, -67.8, 0.65, 20, 0.55, darkSteelMat, MaterialId.METAL, false);
+      appendIBeam(siloSink, wx, 0.5, -22.8, 20.0, 0.58, 0.48, 0, 0, Math.PI * 0.5, 'bareSteel');
+      appendIBeam(siloSink, wx, 0.5, -67.7, 20.0, 0.58, 0.48, 0, 0, Math.PI * 0.5, 'bareSteel');
     }
     for (const wz of [-30, -44, -58]) {
-      addBox('silo', -17.8, 0, wz, 0.55, 20, 0.65, darkSteelMat, MaterialId.METAL, false);
-      if (wz !== -30) addBox('silo', 17.8, 0, wz, 0.55, 20, 0.65, darkSteelMat, MaterialId.METAL, false);
-      addBox('silo', -17.5, 1.0, wz + 0.8, 0.16, 18, 0.16, pipeBlueMat, MaterialId.METAL, false, false, false);
+      appendIBeam(siloSink, -17.7, 0.5, wz, 20.0, 0.58, 0.48, 0, Math.PI * 0.5, Math.PI * 0.5, 'bareSteel');
+      if (wz !== -30) {
+        appendIBeam(siloSink, 17.7, 0.5, wz, 20.0, 0.58, 0.48, 0, Math.PI * 0.5, Math.PI * 0.5, 'bareSteel');
+      }
+      appendDetailedPipeRun(siloSink, -17.3, -7.5, wz + 0.9, 9.5, wz + 0.9, 0.14, 'pipeBlue', wz === -44);
+      appendDetailedPipeRun(siloSink, -17.3, -7.5, wz + 1.35, 9.5, wz + 1.35, 0.11, 'pipeRed', false);
     }
+    // Ceiling transverse I-Beam roof trusses spanning 36m across Silo Hall!
+    for (const tz of [-28, -36, -44, -52, -60]) {
+      appendIBeam(siloSink, 0, 9.55, tz, 35.6, 0.65, 0.46, 0, 0, 0, 'bareSteel');
+    }
+
     addHazardStrip('silo', 0, -7.96, -35.85, 11.4, 0.08, 0.28);
     addHazardStrip('silo', 0, -7.96, -52.15, 11.4, 0.08, 0.28);
     addHazardStrip('silo', -5.65, -7.96, -44.0, 0.28, 0.08, 16.5);
     addHazardStrip('silo', 5.65, -7.96, -44.0, 0.28, 0.08, 16.5);
 
-    // Central Giant Multi-Stage ICBM Missile + Booster Nozzle + Umbilical Arms + Overhead Bridge Crane
+    // Central Giant Multi-Stage ICBM Missile with Bolted Interstage Rings, Booster Flanges & Painted/Bare Steel Layers
     const missilePts: Array<[number, number]> = [
       [0.01, -11.5],
-      [1.35, -11.5],
-      [1.05, -10.4],
-      [2.15, -10.1],
-      [2.15, -3.2],
-      [2.05, -2.95],
-      [2.15, -2.7],
-      [2.15, 2.6],
+      [1.45, -11.5],
+      [1.08, -10.3],
+      [2.16, -9.9],
+      [2.16, -3.2],
+      [2.02, -2.95],
+      [2.16, -2.65],
+      [2.16, 2.55],
       [1.82, 5.4],
       [0.92, 7.9],
       [0.01, 8.95],
     ];
-    const missileGeo = new THREE.LatheGeometry(missilePts.map(([r, y]) => new THREE.Vector2(r, y)), 28);
+    const missileGeo = new THREE.LatheGeometry(missilePts.map(([r, y]) => new THREE.Vector2(r, y)), 32);
     pushBatch('silo', missileGeo, steelMat, MaterialId.METAL, 0, 0, -44, 0, 0, 0, false, false);
-    // Missile collar bands (red warning ring + hazard trim)
-    const stageCollar = new THREE.CylinderGeometry(2.20, 2.20, 0.42, 28);
-    pushBatch('silo', stageCollar, this.pipeRedMat, MaterialId.METAL, 0, 2.4, -44, 0, 0, 0, false, false);
-    pushBatch('silo', new THREE.CylinderGeometry(2.20, 2.20, 0.34, 28), pipeYellowMat, MaterialId.METAL, 0, -3.0, -44, 0, 0, 0, false, false);
+    // Bolted structural interstage rings, cable raceway & warning markings
+    for (const ry of [-8.8, -5.8, -0.4, 2.55, 5.2]) {
+      const rRad = ry > 4 ? 1.88 : 2.22;
+      pushBatch('silo', new THREE.CylinderGeometry(rRad, rRad, 0.16, 32), darkSteelMat, MaterialId.METAL, 0, ry, -44, 0, 0, 0, false, false);
+    }
+    pushBatch('silo', new THREE.CylinderGeometry(2.20, 2.20, 0.36, 32), this.pipeRedMat, MaterialId.METAL, 0, 2.15, -44, 0, 0, 0, false, false);
+    pushBatch('silo', new THREE.CylinderGeometry(2.20, 2.20, 0.28, 32), pipeYellowMat, MaterialId.METAL, 0, -3.0, -44, 0, 0, 0, false, false);
+    // Vertical exterior telemetry conduit spine running up missile hull
+    for (const side of [-1, 1]) {
+      pushBatch('silo', createChamferedBox(0.24, 14.5, 0.22, 0.03, 1, 1), darkSteelMat, MaterialId.METAL, side * 2.18, -2.2, -44);
+    }
     this.colliders.push({
       box: new THREE.Box3(new THREE.Vector3(-2.3, -12, -46.3), new THREE.Vector3(2.3, 9, -41.7)),
       material: MaterialId.METAL,
       blocksSight: true,
     });
 
+    // 4 Heavy Steel I-Beam Gantry Truss Towers + Bolted Gusset Connections + Umbilical Arms + Cross Bracing!
     for (const [gx, gz] of [[-4.8, -40], [4.8, -40], [-4.8, -48], [4.8, -48]]) {
-      addBox('silo', gx, -1.5, gz, 0.65, 21.0, 0.65, catwalkMat, MaterialId.METAL, true, false, false);
-      // Horizontal gantry umbilical arms reaching toward the ICBM hull
+      // Twin-flange heavy vertical I-Beam tower column
+      appendIBeam(siloSink, gx, -1.5, gz, 21.0, 0.62, 0.56, 0, 0, Math.PI * 0.5, 'bareSteel');
+      this.colliders.push({
+        box: new THREE.Box3(new THREE.Vector3(gx - 0.35, -12.0, gz - 0.35), new THREE.Vector3(gx + 0.35, 9.0, gz + 0.35)),
+        material: MaterialId.METAL,
+        blocksSight: true,
+      });
       const sx = gx < 0 ? 1 : -1;
       const sz = gz < -44 ? 1 : -1;
-      addBox('silo', gx + sx * 1.4, -3.0, gz + sz * 1.1, 2.8, 0.32, 0.32, darkSteelMat, MaterialId.METAL, false);
-      addBox('silo', gx + sx * 1.4, 2.2, gz + sz * 1.1, 2.8, 0.32, 0.32, darkSteelMat, MaterialId.METAL, false);
+      for (const armY of [-6.4, -2.6, 1.8, 5.6]) {
+        appendBoltedGusset(siloSink, gx + sx * 0.38, armY, gz, 0.56, 0.52, 0.08, 0, 2, 2);
+        appendIBeam(siloSink, gx + sx * 1.45, armY, gz + sz * 1.1, 2.7, 0.28, 0.24, 0, sx * sz * -0.58, 0, 'bareSteel');
+      }
     }
-    // Overhead Silo Bridge Crane spanning X = -17.5..17.5 at Y = +8.1
-    addBox('silo', 0, 8.1, -44, 35.0, 0.72, 1.4, pipeYellowMat, MaterialId.METAL, false);
-    addBox('silo', -3.5, 7.45, -44, 2.2, 0.65, 1.8, darkSteelMat, MaterialId.METAL, false);
-    addBox('silo', 0, -7.55, -35.8, 11.4, 0.9, 0.14, handrailMat, MaterialId.METAL, false, false, false);
-    addBox('silo', 0, -7.55, -52.2, 11.4, 0.9, 0.14, handrailMat, MaterialId.METAL, false, false, false);
-
-    // 2nd-Floor Catwalk Loop (Y = -3.8) + Smooth Ramps
-    addSlopedSlab('silo', -14.5, -24, -8.0, -38, -3.8, 3.2, 0.3, catwalkMat, MaterialId.METAL);
-    addSlopedSlab('silo', 14.5, -24, -8.0, -38, -3.8, 3.2, 0.3, catwalkMat, MaterialId.METAL);
-    addSlopedHandrail('silo', -13.0, -24, -8.0, -38, -3.8);
-    addSlopedHandrail('silo', 13.0, -24, -8.0, -38, -3.8);
-    addFloor('silo', -18.0, -12.5, -64.2, -38, -3.8, catwalkMat, MaterialId.METAL);
-    addFloor('silo', 12.5, 18.0, -64.2, -38, -3.8, catwalkMat, MaterialId.METAL);
-    addFloor('silo', -12.5, 12.5, -64.2, -59, -3.8, catwalkMat, MaterialId.METAL);
-
-    addBox('silo', -12.6, -3.25, -51, 0.12, 1.0, 26, handrailMat, MaterialId.METAL, false, false, false);
-    addBox('silo', 12.6, -3.25, -51, 0.12, 1.0, 26, handrailMat, MaterialId.METAL, false, false, false);
-    addBox('silo', 0, -3.25, -59.1, 25, 1.0, 0.12, handrailMat, MaterialId.METAL, false, false, false);
-
-    // Glowing Main Control Terminal + Server Racks
-    addBox('silo', 6.2, -7.1, -34.0, 1.6, 1.8, 0.85, darkSteelMat, MaterialId.METAL, true, false, false);
-    pushBatch('silo', new THREE.BoxGeometry(1.1, 0.55, 0.08), ledCyanMat, MaterialId.METAL, 6.2, -6.6, -33.55);
-
-    for (const [sx, sz] of [[-7.5, -31], [-9.2, -31], [8.5, -45], [8.5, -49]]) {
-      addBox('silo', sx, -6.9, sz, 1.1, 2.2, 0.9, darkSteelMat, MaterialId.METAL, true, false, false);
-      pushBatch('silo', new THREE.BoxGeometry(0.7, 0.12, 0.05), ledCyanMat, MaterialId.METAL, sx, -6.3, sz + 0.46);
+    // Horizontal gantry perimeter tie-beams connecting the 4 towers
+    for (const ty of [-3.4, 1.4, 6.2]) {
+      appendIBeam(siloSink, 0, ty, -40, 9.4, 0.32, 0.24, 0, 0, 0, 'bareSteel');
+      appendIBeam(siloSink, 0, ty, -48, 9.4, 0.32, 0.24, 0, 0, 0, 'bareSteel');
+      appendIBeam(siloSink, -4.8, ty, -44, 7.8, 0.32, 0.24, 0, Math.PI * 0.5, 0, 'bareSteel');
+      appendIBeam(siloSink, 4.8, ty, -44, 7.8, 0.32, 0.24, 0, Math.PI * 0.5, 0, 'bareSteel');
     }
 
-    // Silo Hall Primary Non-Shadow PointLights
-    const pitWarm1 = new THREE.PointLight(0xff7b29, 44, 36, 1.4);
+    // Overhead Twin-Girder Yellow I-Beam Bridge Crane + Hoist Trolley + Hook Assembly (Y = +8.1)
+    appendIBeam(siloSink, 0, 8.1, -43.2, 35.0, 0.78, 0.42, 0, 0, 0, 'pipeYellow');
+    appendIBeam(siloSink, 0, 8.1, -44.8, 35.0, 0.78, 0.42, 0, 0, 0, 'pipeYellow');
+    pushBatch('silo', createChamferedBox(2.4, 0.68, 2.1, 0.04, 2, 2), darkSteelMat, MaterialId.METAL, -3.5, 7.55, -44);
+    pushBatch('silo', new THREE.CylinderGeometry(0.18, 0.18, 1.3, 12), darkSteelMat, MaterialId.METAL, -3.5, 6.8, -44);
+
+    // OPEN TUBULAR INDUSTRIAL GUARDRAILS around Central Missile Pit (Zero solid yellow blocks!)
+    appendIndustrialGuardrail(siloSink, -5.6, -8.0, -35.8, 5.6, -8.0, -35.8);
+    appendIndustrialGuardrail(siloSink, -5.6, -8.0, -52.2, 5.6, -8.0, -52.2);
+    appendIndustrialGuardrail(siloSink, -5.6, -8.0, -52.2, -5.6, -8.0, -35.8);
+    appendIndustrialGuardrail(siloSink, 5.6, -8.0, -52.2, 5.6, -8.0, -35.8);
+
+    // 2nd-Floor Perforated Metal Grating Catwalk Loop (Y = -3.8) + Smooth Ramps + Open Tubular Guardrails!
+    addSlopedSlab('silo', -14.5, -24, -8.0, -38, -3.8, 3.2, 0.26, darkSteelMat, MaterialId.METAL);
+    addSlopedSlab('silo', 14.5, -24, -8.0, -38, -3.8, 3.2, 0.26, darkSteelMat, MaterialId.METAL);
+    appendIndustrialGuardrail(siloSink, -12.95, -8.0, -24, -12.95, -3.8, -38);
+    appendIndustrialGuardrail(siloSink, 12.95, -8.0, -24, 12.95, -3.8, -38);
+
+    // Perforated see-through grating balcony decks + registered FloorZones
+    appendGratingPlatform(siloSink, -15.25, -3.8, -51.1, 5.5, 26.2);
+    appendGratingPlatform(siloSink, 15.25, -3.8, -51.1, 5.5, 26.2);
+    appendGratingPlatform(siloSink, 0.0, -3.8, -61.6, 25.0, 5.2);
+    this.floorZones.push(
+      { minX: -18.0, maxX: -12.5, minZ: -64.2, maxZ: -38, yAt: () => -3.8, mat: MaterialId.METAL },
+      { minX: 12.5, maxX: 18.0, minZ: -64.2, maxZ: -38, yAt: () => -3.8, mat: MaterialId.METAL },
+      { minX: -12.5, maxX: 12.5, minZ: -64.2, maxZ: -59, yAt: () => -3.8, mat: MaterialId.METAL }
+    );
+    // Open tubular safety guardrails flanking entire 2nd-floor grating catwalk!
+    appendIndustrialGuardrail(siloSink, -12.55, -3.8, -38.0, -12.55, -3.8, -59.0);
+    appendIndustrialGuardrail(siloSink, 12.55, -3.8, -38.0, 12.55, -3.8, -59.0);
+    appendIndustrialGuardrail(siloSink, -12.55, -3.8, -59.0, 12.55, -3.8, -59.0);
+
+    // Detailed Main Command Console + Industrial Switchgear Equipment Cabinets (preserving exact collider bounds!)
+    appendCommandConsole(siloSink, 6.2, -8.0, -34.0, 0);
+    this.colliders.push({
+      box: new THREE.Box3(new THREE.Vector3(5.2, -8.0, -34.6), new THREE.Vector3(7.2, -6.0, -33.4)),
+      material: MaterialId.METAL,
+      blocksSight: true,
+    });
+
+    for (const [sx, sz, sRot] of [
+      [-7.5, -31, 0],
+      [-9.2, -31, 0],
+      [8.8, -45, -Math.PI * 0.5],
+      [8.8, -49, -Math.PI * 0.5],
+    ] as Array<[number, number, number]>) {
+      appendPowerCabinet(siloSink, sx, -8.0, sz, sRot, 1.15, 2.15, 0.85);
+      this.colliders.push({
+        box: new THREE.Box3(new THREE.Vector3(sx - 0.6, -8.0, sz - 0.55), new THREE.Vector3(sx + 0.6, -5.8, sz + 0.55)),
+        material: MaterialId.METAL,
+        blocksSight: true,
+      });
+    }
+
+    // Visible Physical High-Bay Pendant Lamps & Wall Sconces lighting the 3-story Silo Hall cleanly!
+    for (const [lx, lz] of [[-9.5, -33], [9.5, -33], [-9.5, -54], [9.5, -54], [0, -30], [0, -58]]) {
+      appendIndustrialLightFixture(siloSink, lx, 8.6, lz, 0, 'highBay', 'emissiveCool');
+    }
+    for (const wz of [-34, -52]) {
+      appendIndustrialLightFixture(siloSink, -17.8, -1.6, wz, Math.PI * 0.5, 'wallSconce', 'emissiveWarm');
+      appendIndustrialLightFixture(siloSink, 17.8, -1.6, wz, -Math.PI * 0.5, 'wallSconce', 'emissiveWarm');
+    }
+
+    // Silo Hall Balanced Non-Shadow PointLights anchored directly at visible industrial light fixtures!
+    const pitWarm1 = new THREE.PointLight(0xffa452, 54, 42, 1.35);
     pitWarm1.castShadow = false;
-    pitWarm1.position.set(-4.0, -10.5, -44);
+    pitWarm1.position.set(-4.2, -9.2, -44);
     this.zones.silo.add(pitWarm1);
-    const pitWarm2 = new THREE.PointLight(0xff7b29, 44, 36, 1.4);
+    const pitWarm2 = new THREE.PointLight(0xffa452, 54, 42, 1.35);
     pitWarm2.castShadow = false;
-    pitWarm2.position.set(4.0, -10.5, -44);
+    pitWarm2.position.set(4.2, -9.2, -44);
     this.zones.silo.add(pitWarm2);
     this.siloFloorLights.push(pitWarm1, pitWarm2);
 
-    const termBlue = new THREE.PointLight(0x38b6ff, 18, 22, 1.5);
+    const termBlue = new THREE.PointLight(0x64c8f0, 22, 24, 1.45);
     termBlue.castShadow = false;
-    termBlue.position.set(6.2, -5.8, -33.0);
+    termBlue.position.set(6.2, -5.6, -33.0);
     this.zones.silo.add(termBlue);
 
-    const catwalkWhite = new THREE.PointLight(0xbfd8f0, 24, 34, 1.5);
+    const catwalkWhite = new THREE.PointLight(0xd4e4f4, 46, 48, 1.3);
     catwalkWhite.castShadow = false;
-    catwalkWhite.position.set(0, 1.5, -45);
+    catwalkWhite.position.set(0, 4.5, -42);
     this.zones.silo.add(catwalkWhite);
 
+    const catwalkNorth = new THREE.PointLight(0xcce0f2, 34, 42, 1.35);
+    catwalkNorth.castShadow = false;
+    catwalkNorth.position.set(0, 1.2, -31);
+    this.zones.silo.add(catwalkNorth);
+
+    const catwalkSouth = new THREE.PointLight(0xffd2a0, 32, 42, 1.35);
+    catwalkSouth.castShadow = false;
+    catwalkSouth.position.set(0, 1.2, -56);
+    this.zones.silo.add(catwalkSouth);
+
     this.dynamicLights.push(
-      { pos: pitWarm1.position.clone(), light: pitWarm1, baseIntensity: 44, flicker: false, phase: 0 },
-      { pos: pitWarm2.position.clone(), light: pitWarm2, baseIntensity: 44, flicker: false, phase: 0 },
-      { pos: termBlue.position.clone(), light: termBlue, baseIntensity: 18, flicker: false, phase: 0 },
-      { pos: catwalkWhite.position.clone(), light: catwalkWhite, baseIntensity: 24, flicker: false, phase: 0 }
+      { pos: pitWarm1.position.clone(), light: pitWarm1, baseIntensity: 54, flicker: false, phase: 0 },
+      { pos: pitWarm2.position.clone(), light: pitWarm2, baseIntensity: 54, flicker: false, phase: 0 },
+      { pos: termBlue.position.clone(), light: termBlue, baseIntensity: 22, flicker: false, phase: 0 },
+      { pos: catwalkWhite.position.clone(), light: catwalkWhite, baseIntensity: 46, flicker: false, phase: 0 },
+      { pos: catwalkNorth.position.clone(), light: catwalkNorth, baseIntensity: 34, flicker: false, phase: 0 },
+      { pos: catwalkSouth.position.clone(), light: catwalkSouth, baseIntensity: 32, flicker: false, phase: 0 }
     );
 
     // =========================================================================
